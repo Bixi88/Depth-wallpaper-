@@ -185,7 +185,12 @@ class DepthWallpaperService : WallpaperService() {
             try {
                 canvas = holder.lockCanvas()
                 if (canvas != null) {
-                    DepthRenderer.render(canvas, canvas.width, canvas.height, config, bgBitmap, fgBitmap)
+                    DepthRenderer.render(
+                        canvas, canvas.width, canvas.height, config, bgBitmap, fgBitmap,
+                        // Scala dei testi ancorata alla larghezza reale dello schermo,
+                        // cosi' l'orologio esce delle stesse proporzioni dell'anteprima.
+                        scaleReferenceWidth = resources.displayMetrics.widthPixels
+                    )
                 }
             } catch (e: Throwable) {
                 // superficie non pronta o errore di disegno: salta il frame

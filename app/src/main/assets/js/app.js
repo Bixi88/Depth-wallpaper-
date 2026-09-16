@@ -5,7 +5,10 @@
   // COSTANTI
   // ===========================================================================
   const CANVAS_W = 1080;
-  const CANVAS_H = 1920;
+  // Altezza dell'anteprima: sostituita all'avvio con le proporzioni reali dello
+  // schermo (vedi applyScreenAspect), cosi' anteprima, PNG esportato e sfondo
+  // animato hanno esattamente la stessa inquadratura.
+  let CANVAS_H = 1920;
 
   const FONTS = [
     { key: "sans", label: "Sans (Roboto)", css: "sans-serif" },
@@ -77,6 +80,7 @@
       y: y,
       stretchX: 1,
       stretchY: 1,
+      rotation: 0,
       tracking: 0,
       outlineWidth: 0,
       outlineColor: "#000000",
@@ -266,6 +270,7 @@
     context.font = `${italic}${weight} ${size}px ${fontCss(style.fontKey)}`;
 
     context.translate(style.x * w, style.y * h);
+    if (style.rotation) context.rotate((style.rotation * Math.PI) / 180);
     context.scale(sx, sy);
 
     const lines = multiline ? wrapLines(context, text, (w * 0.92) / sx, tracking) : [String(text)];
@@ -329,12 +334,16 @@
 
     context.restore();
 
-    return {
-      x: style.x,
-      y: style.y,
-      halfW: (maxW * sx) / 2 / w,
-      halfH: ((lines.length * lineHeight) * sy) / 2 / h,
-    };
+    const halfW = (maxW * sx) / 2 / w;
+    const halfH = ((lines.length * lineHeight) * sy) / 2 / h;
+    if (style.rotation) {
+      // Testo ruotato: si usa un riquadro circolare attorno al centro, cosi'
+      // il trascinamento sull'anteprima resta agganciato al testo comunque
+      // sia inclinato.
+      const r = Math.hypot(halfW, halfH * (h / w));
+      return { x: style.x, y: style.y, halfW: r, halfH: (r * w) / h };
+    }
+    return { x: style.x, y: style.y, halfW: halfW, halfH: halfH };
   }
 
   // ===========================================================================
@@ -894,6 +903,7 @@
 
     bindRange(prefix + "XRange", prefix + "XValue", (v) => { st().x = v / 100; }, (v) => v + "%");
     bindRange(prefix + "YRange", prefix + "YValue", (v) => { st().y = v / 100; }, (v) => v + "%");
+    bindRange(prefix + "RotationRange", prefix + "RotationValue", (v) => { st().rotation = v; }, (v) => v + "\u00B0");
     bindRange(prefix + "StretchXRange", prefix + "StretchXValue", (v) => { st().stretchX = v / 100; }, (v) => v + "%");
     bindRange(prefix + "StretchYRange", prefix + "StretchYValue", (v) => { st().stretchY = v / 100; }, (v) => v + "%");
   }
@@ -919,6 +929,7 @@
     setSlider(prefix + "PlateRange", Math.round(s.plateOpacity * 100));
     setSlider(prefix + "XRange", Math.round(s.x * 100));
     setSlider(prefix + "YRange", Math.round(s.y * 100));
+    setSlider(prefix + "RotationRange", Math.round(s.rotation || 0));
     setSlider(prefix + "StretchXRange", Math.round(s.stretchX * 100));
     setSlider(prefix + "StretchYRange", Math.round(s.stretchY * 100));
   }
@@ -1075,6 +1086,147 @@
   }
 
   // ===========================================================================
+  // PIPETTA: copia un colore dalla foto
+  // ---------------------------------------------------------------------------
+  // Accanto a ogni selettore di colore compare una pipetta. Premendola, l'anteprima
+  // entra in modalita' prelievo: trascinando il dito si vede in tempo reale il
+  // colore sotto al punto toccato e, al rilascio, quel colore finisce nel campo che
+  // ha avviato il prelievo. Il prelievo avviene su una copia dell'anteprima che
+  // contiene SOLO foto e soggetto (niente orologio, data o velo scuro): altrimenti
+  // si finirebbe per copiare il colore del testo invece che quello dell'immagine.
+  // ===========================================================================
+  const eyedropOverlay = document.getElementById("eyedropOverlay");
+  const eyedropBubble = document.getElementById("eyedropBubble");
+  const eyedropSwatch = document.getElementById("eyedropSwatch");
+  const eyedropHex = document.getElementById("eyedropHex");
+
+  let eyedrop = null;          // { input, btn } quando il prelievo e' attivo
+  let eyedropCanvas = null;    // copia con i soli livelli immagine
+  let eyedropPicking = false;
+  let eyedropLastHex = null;
+
+  function toHex(n) { return Math.max(0, Math.min(255, n | 0)).toString(16).padStart(2, "0"); }
+
+  function buildEyedropSource() {
+    const c = document.createElement("canvas");
+    c.width = CANVAS_W;
+    c.height = CANVAS_H;
+    const g = c.getContext("2d", { willReadFrequently: true });
+    g.fillStyle = "#000000";
+    g.fillRect(0, 0, c.width, c.height);
+    if (state.bg.img) {
+      drawCover(g, state.bg.img, c.width, c.height, state.bg.scale, state.bg.offX, state.bg.offY, state.bg.rotation);
+    }
+    if (state.fg.img) {
+      const link = state.linkFgToBg;
+      drawCover(
+        g, state.fg.img, c.width, c.height,
+        link ? state.bg.scale * state.fg.scale : state.fg.scale,
+        link ? state.bg.offX + state.fg.offX : state.fg.offX,
+        link ? state.bg.offY + state.fg.offY : state.fg.offY,
+        link ? state.bg.rotation : 0
+      );
+    }
+    return c;
+  }
+
+  function sampleColorAt(xFrac, yFrac) {
+    if (!eyedropCanvas) return null;
+    const g = eyedropCanvas.getContext("2d", { willReadFrequently: true });
+    const x = Math.min(eyedropCanvas.width - 1, Math.max(0, Math.round(xFrac * eyedropCanvas.width)));
+    const y = Math.min(eyedropCanvas.height - 1, Math.max(0, Math.round(yFrac * eyedropCanvas.height)));
+    try {
+      // Media su un quadratino di 5x5: su una foto rumorosa il singolo pixel
+      // restituirebbe un colore che a occhio non corrisponde a quello toccato.
+      const r = 2;
+      const x0 = Math.max(0, x - r);
+      const y0 = Math.max(0, y - r);
+      const w = Math.min(eyedropCanvas.width - x0, r * 2 + 1);
+      const h = Math.min(eyedropCanvas.height - y0, r * 2 + 1);
+      const data = g.getImageData(x0, y0, w, h).data;
+      let sr = 0, sg = 0, sb = 0, n = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const a = data[i + 3] / 255;
+        sr += data[i] * a; sg += data[i + 1] * a; sb += data[i + 2] * a; n += a;
+      }
+      if (n <= 0) return "#000000";
+      return "#" + toHex(sr / n) + toHex(sg / n) + toHex(sb / n);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function startEyedrop(input, btn) {
+    if (!state.bg.img) { showToast("Carica prima una foto"); return; }
+    stopEyedrop();
+    eyedropCanvas = buildEyedropSource();
+    eyedrop = { input: input, btn: btn };
+    btn.classList.add("armed");
+    eyedropOverlay.classList.remove("hidden");
+    eyedropBubble.classList.remove("show");
+    dragHint.style.opacity = "0";
+  }
+
+  function stopEyedrop() {
+    if (eyedrop) eyedrop.btn.classList.remove("armed");
+    eyedrop = null;
+    eyedropCanvas = null;
+    eyedropPicking = false;
+    eyedropLastHex = null;
+    eyedropOverlay.classList.add("hidden");
+    eyedropBubble.classList.remove("show");
+    dragHint.style.opacity = "1";
+  }
+
+  function previewEyedrop(hex) {
+    if (!hex) return;
+    eyedropLastHex = hex;
+    eyedropBubble.classList.add("show");
+    eyedropSwatch.style.background = hex;
+    eyedropHex.textContent = hex.toUpperCase();
+  }
+
+  /** Applica il colore al campo che ha avviato il prelievo. L'evento "input"
+   *  riusa esattamente la stessa strada di una scelta manuale nel selettore. */
+  function commitEyedrop(hex) {
+    if (!eyedrop || !hex) { stopEyedrop(); return; }
+    const input = eyedrop.input;
+    input.value = hex;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    stopEyedrop();
+    showToast("Colore copiato: " + hex.toUpperCase());
+  }
+
+  const EYEDROP_ICON =
+    '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+    '<path d="M16.5 3.5a2.4 2.4 0 013.4 3.4l-1.9 1.9 1 1-1.6 1.6-1-1L8.6 18H5.5v-3.1l8.6-8.6-1-1L14.7 3.7l1 1z" />' +
+    "</svg>";
+
+  document.querySelectorAll('input[type="color"]').forEach((input) => {
+    const row = document.createElement("div");
+    row.className = "color-row";
+    input.parentNode.insertBefore(row, input);
+    row.appendChild(input);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "eyedrop-btn";
+    btn.title = "Copia un colore dalla foto";
+    btn.innerHTML = EYEDROP_ICON;
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (eyedrop && eyedrop.input === input) stopEyedrop();
+      else startEyedrop(input, btn);
+    });
+    row.appendChild(btn);
+  });
+
+  // Cambiando scheda il prelievo in corso si annulla: la pipetta resterebbe
+  // armata su un campo non piu' visibile.
+  document.querySelectorAll(".tab-btn").forEach((b) => b.addEventListener("click", () => { if (eyedrop) stopEyedrop(); }));
+
+  // ===========================================================================
   // TRASCINAMENTO SULL'ANTEPRIMA
   // ===========================================================================
   let dragTarget = null;
@@ -1098,6 +1250,12 @@
 
   function handlePointerDown(evt) {
     const p = canvasPointFromEvent(evt);
+    if (eyedrop) {
+      eyedropPicking = true;
+      previewEyedrop(sampleColorAt(p.xFrac, p.yFrac));
+      evt.preventDefault();
+      return;
+    }
     const dDate = state.date.enabled ? boxDistance(hitBoxes.date, p.xFrac, p.yFrac) : Infinity;
     const dClock = state.clock.enabled ? boxDistance(hitBoxes.clock, p.xFrac, p.yFrac) : Infinity;
     if (Math.min(dDate, dClock) > 0.06) return;
@@ -1107,6 +1265,13 @@
   }
 
   function handlePointerMove(evt) {
+    if (eyedrop) {
+      if (!eyedropPicking) return;
+      const q = canvasPointFromEvent(evt);
+      previewEyedrop(sampleColorAt(q.xFrac, q.yFrac));
+      evt.preventDefault();
+      return;
+    }
     if (!dragTarget) return;
     const p = canvasPointFromEvent(evt);
     const prefix = dragTarget;
@@ -1117,6 +1282,10 @@
   }
 
   function handlePointerUp() {
+    if (eyedrop) {
+      if (eyedropPicking) commitEyedrop(eyedropLastHex);
+      return;
+    }
     dragTarget = null;
     dragHint.style.opacity = "1";
   }
@@ -1135,7 +1304,7 @@
     return {
       fontKey: s.fontKey, bold: s.bold, italic: s.italic, size: s.size,
       color: s.color, opacity: s.opacity, x: s.x, y: s.y,
-      stretchX: s.stretchX, stretchY: s.stretchY, tracking: s.tracking,
+      stretchX: s.stretchX, stretchY: s.stretchY, rotation: s.rotation || 0, tracking: s.tracking,
       outlineWidth: s.outlineWidth, outlineColor: s.outlineColor,
       glowWidth: s.glowWidth, glowColor: s.glowColor,
       shadowOpacity: s.shadowOpacity, shadowBlur: s.shadowBlur, shadowOffsetY: s.shadowOffsetY,
@@ -1289,8 +1458,43 @@
   };
 
   // ===========================================================================
+  // PROPORZIONI DELL'ANTEPRIMA = PROPORZIONI DELLO SCHERMO
+  // ---------------------------------------------------------------------------
+  // L'anteprima era fissa a 1080x1920 (9:16), mentre gli schermi reali sono molto
+  // piu' allungati (20:9 e oltre). Il testo viene dimensionato rispetto alla
+  // larghezza, quindi sullo sfondo vero restava alto uguale ma, su un'immagine
+  // molto piu' alta, sembrava piu' piccolo e finiva in un punto diverso.
+  // Qui l'anteprima prende le proporzioni dello schermo: quello che si vede e'
+  // quello che si ottiene, sia come sfondo animato sia come PNG esportato.
+  // ===========================================================================
+  function applyScreenAspect() {
+    let w = 0;
+    let h = 0;
+    if (isNative && typeof Android.getScreenMetrics === "function") {
+      try {
+        const m = JSON.parse(Android.getScreenMetrics() || "{}");
+        w = Number(m.width) || 0;
+        h = Number(m.height) || 0;
+      } catch (e) { /* si usa il ripiego qui sotto */ }
+    }
+    if (!(w > 0 && h > 0) && window.screen) {
+      w = Math.min(window.screen.width, window.screen.height);
+      h = Math.max(window.screen.width, window.screen.height);
+    }
+    if (!(w > 0 && h > 0)) return;
+
+    const ratio = Math.min(2.6, Math.max(1.3, h / w));
+    CANVAS_H = Math.round(CANVAS_W * ratio);
+    canvas.width = CANVAS_W;
+    canvas.height = CANVAS_H;
+    const frame = document.getElementById("canvas-frame");
+    if (frame) frame.style.aspectRatio = CANVAS_W + " / " + CANVAS_H;
+  }
+
+  // ===========================================================================
   // INIT
   // ===========================================================================
+  applyScreenAspect();
   syncTextLayerUi("clock", state.clock);
   syncTextLayerUi("date", state.date);
   syncImageUi();

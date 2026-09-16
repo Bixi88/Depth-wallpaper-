@@ -18,6 +18,7 @@ data class TextLayerConfig(
     val y: Float,           // 0..1
     val stretchX: Float,
     val stretchY: Float,
+    val rotation: Float,    // gradi, -180..180
     val tracking: Float,    // spaziatura tra le lettere, px @1080
     // --- leggibilita' ---
     val outlineWidth: Float,   // px @1080, 0 = nessun contorno
@@ -48,6 +49,7 @@ data class TextLayerConfig(
                 y = j.optDouble("y", defY.toDouble()).toFloat(),
                 stretchX = j.optDouble("stretchX", 1.0).toFloat(),
                 stretchY = j.optDouble("stretchY", 1.0).toFloat(),
+                rotation = j.optDouble("rotation", 0.0).toFloat(),
                 tracking = j.optDouble("tracking", 0.0).toFloat(),
                 outlineWidth = j.optDouble("outlineWidth", 0.0).toFloat(),
                 outlineColor = j.optString("outlineColor", "#000000"),
@@ -64,7 +66,7 @@ data class TextLayerConfig(
         fun default(size: Float, y: Float, bold: Boolean) = TextLayerConfig(
             fontKey = "sans", bold = bold, italic = false, size = size,
             color = "#ffffff", opacity = 1f, x = 0.5f, y = y,
-            stretchX = 1f, stretchY = 1f, tracking = 0f,
+            stretchX = 1f, stretchY = 1f, rotation = 0f, tracking = 0f,
             outlineWidth = 0f, outlineColor = "#000000",
             shadowOpacity = 0.45f, shadowBlur = 10f, shadowOffsetY = 4f,
             glowWidth = 0f, glowColor = "#000000",

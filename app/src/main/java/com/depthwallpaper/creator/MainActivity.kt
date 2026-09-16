@@ -25,6 +25,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
@@ -74,11 +75,30 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        applySystemBarsColor()
         setContentView(R.layout.activity_main)
 
         webView = findViewById(R.id.webview)
         setupWebView()
         webView.loadUrl("file:///android_asset/index.html")
+    }
+
+    /**
+     * Barre di sistema dello stesso nero dell'interfaccia, con icone chiare.
+     * Il tema (res/values/themes.xml) fa gia' la stessa cosa: questo e' il
+     * rinforzo per le skin che ignorano gli attributi del tema.
+     */
+    private fun applySystemBarsColor() {
+        try {
+            val bar = ContextCompat.getColor(this, R.color.app_background)
+            window.statusBarColor = bar
+            window.navigationBarColor = bar
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            controller.isAppearanceLightStatusBars = false
+            controller.isAppearanceLightNavigationBars = false
+        } catch (e: Throwable) {
+            // tema gia' corretto: nessun problema
+        }
     }
 
     override fun onBackPressed() {
@@ -380,6 +400,37 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }.start()
+        }
+
+        /**
+         * Dimensioni reali dello schermo in pixel (barre di sistema incluse).
+         * Servono all'editor per dare all'anteprima le stesse proporzioni dello
+         * sfondo reale: prima l'anteprima era fissa 9:16 e su uno schermo piu'
+         * allungato l'orologio finiva per apparire piu' piccolo del previsto.
+         */
+        @JavascriptInterface
+        fun getScreenMetrics(): String {
+            return try {
+                val w: Int
+                val h: Int
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val bounds = windowManager.maximumWindowMetrics.bounds
+                    w = bounds.width()
+                    h = bounds.height()
+                } else {
+                    val metrics = android.util.DisplayMetrics()
+                    @Suppress("DEPRECATION")
+                    windowManager.defaultDisplay.getRealMetrics(metrics)
+                    w = metrics.widthPixels
+                    h = metrics.heightPixels
+                }
+                org.json.JSONObject()
+                    .put("width", w.coerceAtLeast(1))
+                    .put("height", h.coerceAtLeast(1))
+                    .toString()
+            } catch (e: Throwable) {
+                "{}"
+            }
         }
 
         /** Piccola utility per mostrare messaggi nativi (Toast) dal JS, se serve. */

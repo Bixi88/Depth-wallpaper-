@@ -28,6 +28,10 @@
         <div id="emptyState">
           <p>Carica una foto per iniziare</p>
         </div>
+        <div id="eyedropOverlay" class="hidden">
+          <div id="eyedropBubble"><span id="eyedropSwatch"></span><span id="eyedropHex">#000000</span></div>
+          <p id="eyedropHint">Tocca la foto per copiare un colore</p>
+        </div>
       </div>
       <p id="dragHint">Trascina orologio e data direttamente sull'anteprima</p>
     </section>
@@ -36,11 +40,47 @@
     <section id="controls">
 
       <nav id="tabs">
-        <button class="tab-btn active" data-tab="media"><span class="tab-ico">&#128444;</span> Media</button>
-        <button class="tab-btn" data-tab="clock"><span class="tab-ico">&#8986;</span> Orologio</button>
-        <button class="tab-btn" data-tab="date"><span class="tab-ico">&#128197;</span> Data</button>
-        <button class="tab-btn" data-tab="bg"><span class="tab-ico">&#127748;</span> Sfondo</button>
-        <button class="tab-btn" data-tab="fg"><span class="tab-ico">&#128100;</span> Soggetto</button>
+        <button class="tab-btn active" data-tab="media">
+          <span class="tab-ico">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="3" />
+              <path d="M3 16l5-5 4 4 3-3 6 6" />
+            </svg>
+          </span> Media
+        </button>
+        <button class="tab-btn" data-tab="clock">
+          <span class="tab-ico">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="8.5" />
+              <path d="M12 7.5V12l3 2" />
+            </svg>
+          </span> Orologio
+        </button>
+        <button class="tab-btn" data-tab="date">
+          <span class="tab-ico">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3.5" y="5" width="17" height="15" rx="3" />
+              <path d="M3.5 10h17M8 3.5v3M16 3.5v3" />
+            </svg>
+          </span> Data
+        </button>
+        <button class="tab-btn" data-tab="bg">
+          <span class="tab-ico">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3.5" y="5" width="17" height="14" rx="3" />
+              <path d="M3.5 17l5.5-6 4 4.5 2.5-2.5 5 4" />
+              <circle cx="15.5" cy="9.5" r="1.4" />
+            </svg>
+          </span> Sfondo
+        </button>
+        <button class="tab-btn" data-tab="fg">
+          <span class="tab-ico">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="8.5" r="3.7" />
+              <path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6" />
+            </svg>
+          </span> Soggetto
+        </button>
       </nav>
 
       <div id="tab-panels">
@@ -185,6 +225,11 @@
             <label>Verticale <span class="value-badge" id="clockYValue">30%</span></label>
             <input type="range" id="clockYRange" min="0" max="100" value="30" data-center="30" />
           </div>
+          <div class="field-group">
+            <label>Rotazione <span class="value-badge" id="clockRotationValue">0&deg;</span></label>
+            <input type="range" id="clockRotationRange" min="-180" max="180" value="0" data-center="0" />
+            <p class="hint-text">Ruota il testo attorno al suo centro: utile per titoli in verticale o inclinati lungo il soggetto.</p>
+          </div>
 
           <div class="field-group section-title">Deformazione</div>
           <div class="field-group">
@@ -299,6 +344,10 @@
           <div class="field-group">
             <label>Verticale <span class="value-badge" id="dateYValue">38%</span></label>
             <input type="range" id="dateYRange" min="0" max="100" value="38" data-center="38" />
+          </div>
+          <div class="field-group">
+            <label>Rotazione <span class="value-badge" id="dateRotationValue">0&deg;</span></label>
+            <input type="range" id="dateRotationRange" min="-180" max="180" value="0" data-center="0" />
           </div>
 
           <div class="field-group section-title">Deformazione</div>

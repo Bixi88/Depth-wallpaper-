@@ -281,22 +281,121 @@ html, body {
   border-radius: 14px 14px 0 0;
   position: relative;
 }
+/* Icone monocromatiche: bianche quando la scheda e' a riposo, nere dentro uno
+   squircle giallo quando e' selezionata. Il riquadro e' 39px, cioe' il 50% in
+   piu' del vecchio cerchio da 26px. */
 .tab-btn .tab-ico {
-  font-size: 15px;
-  width: 26px;
-  height: 26px;
+  width: 39px;
+  height: 39px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  color: #ffffff;
+  border-radius: 34%;
   transition: background 0.15s ease, color 0.15s ease;
+}
+.tab-btn .tab-ico svg {
+  width: 21px;
+  height: 21px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .tab-btn.active {
   color: var(--text-0);
 }
 .tab-btn.active .tab-ico {
   background: var(--accent);
-  color: var(--accent-ink);
+  color: #000000;
+}
+
+/* ---------------- PIPETTA COLORE ---------------- */
+.color-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.color-row input[type="color"] { flex: 1; }
+
+.eyedrop-btn {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-3);
+  color: var(--text-0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.eyedrop-btn svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.eyedrop-btn.armed {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #000000;
+}
+
+#eyedropOverlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 3px var(--accent);
+  border-radius: 22px;
+}
+#eyedropOverlay.hidden { display: none; }
+
+#eyedropHint {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+#eyedropBubble {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  font-variant-numeric: tabular-nums;
+}
+#eyedropBubble.show { display: flex; }
+#eyedropSwatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  background: #000000;
 }
 
 #tab-panels {

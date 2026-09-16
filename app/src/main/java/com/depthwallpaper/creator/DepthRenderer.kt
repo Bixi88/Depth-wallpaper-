@@ -34,11 +34,18 @@ object DepthRenderer {
         height: Int,
         config: WallpaperConfig,
         bg: Bitmap?,
-        fg: Bitmap?
+        fg: Bitmap?,
+        /**
+         * Larghezza (px) su cui calcolare la scala dei testi. Normalmente e' la
+         * larghezza dello SCHERMO: la superficie di un live wallpaper puo' essere
+         * piu' larga (launcher con sfondo scorrevole) e usarla renderebbe i testi
+         * di una dimensione diversa da quella vista nell'anteprima.
+         */
+        scaleReferenceWidth: Int = width
     ) {
         val w = width.toFloat()
         val h = height.toFloat()
-        val k = w / EDITOR_REFERENCE_WIDTH
+        val k = (if (scaleReferenceWidth > 0) scaleReferenceWidth.toFloat() else w) / EDITOR_REFERENCE_WIDTH
 
         canvas.drawColor(Color.BLACK)
 
@@ -222,6 +229,7 @@ object DepthRenderer {
 
         canvas.save()
         canvas.translate(style.x * w, style.y * h)
+        if (style.rotation != 0f) canvas.rotate(style.rotation)
         canvas.scale(sx, sy)
 
         var shadowPending = style.shadowOpacity > 0f
