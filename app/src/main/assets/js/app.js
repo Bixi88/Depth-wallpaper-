@@ -262,9 +262,9 @@
   document.getElementById("btnUploadFg").addEventListener("click", () => requestImage("fg-source"));
 
   /** Chiamata dal lato nativo (Kotlin) quando un'immagine e' stata selezionata e letta. */
-  window.onImageLoaded = function (layer, dataUrl) {
+  window.onImageLoaded = function (layer, dataUrl, errorMessage) {
     if (!dataUrl) {
-      showToast("Nessuna immagine selezionata");
+      showToast(errorMessage || "Nessuna immagine selezionata");
       return;
     }
     if (layer === "fg-source") {

@@ -108,7 +108,8 @@ class MainActivity : ComponentActivity() {
 
     private fun handlePickedImage(uri: Uri?) {
         if (uri == null) {
-            notifyImageLoaded(pendingLayer, null)
+            // Annullamento vero e proprio: l'utente ha chiuso il selettore senza scegliere nulla.
+            notifyImageLoaded(pendingLayer, null, null)
             return
         }
         try {
@@ -124,13 +125,19 @@ class MainActivity : ComponentActivity() {
         try {
             val bytes = readAndDownscale(uri)
             if (bytes == null) {
-                notifyImageLoaded(pendingLayer, null)
+                android.util.Log.e("DepthWallpaper", "readAndDownscale ha restituito null per uri=$uri")
+                notifyImageLoaded(
+                    pendingLayer,
+                    null,
+                    "Impossibile leggere il file selezionato (formato non supportato o file non valido)"
+                )
                 return
             }
             val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-            notifyImageLoaded(pendingLayer, "data:image/jpeg;base64,$base64")
+            notifyImageLoaded(pendingLayer, "data:image/jpeg;base64,$base64", null)
         } catch (e: Exception) {
-            notifyImageLoaded(pendingLayer, null)
+            android.util.Log.e("DepthWallpaper", "Errore leggendo l'immagine uri=$uri", e)
+            notifyImageLoaded(pendingLayer, null, "Errore lettura immagine: ${e.message ?: e.javaClass.simpleName}")
         }
     }
 
@@ -161,11 +168,12 @@ class MainActivity : ComponentActivity() {
         return out.toByteArray()
     }
 
-    private fun notifyImageLoaded(layer: String, dataUrl: String?) {
+    private fun notifyImageLoaded(layer: String, dataUrl: String?, errorMessage: String?) {
         runOnUiThread {
             val arg = if (dataUrl != null) "'${dataUrl}'" else "null"
+            val errArg = if (errorMessage != null) "'${errorMessage.replace("'", "\\'")}'" else "null"
             webView.evaluateJavascript(
-                "window.onImageLoaded && window.onImageLoaded('$layer', $arg);",
+                "window.onImageLoaded && window.onImageLoaded('$layer', $arg, $errArg);",
                 null
             )
         }
@@ -250,7 +258,8 @@ class MainActivity : ComponentActivity() {
                 try {
                     pickImageLauncher.launch(arrayOf("image/*"))
                 } catch (e: Exception) {
-                    notifyImageLoaded(pendingLayer, null)
+                    android.util.Log.e("DepthWallpaper", "Impossibile aprire il selettore immagini", e)
+                    notifyImageLoaded(pendingLayer, null, "Impossibile aprire il selettore immagini: ${e.message}")
                 }
             }
         }

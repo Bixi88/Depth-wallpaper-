@@ -15,7 +15,24 @@ android {
         versionName = "1.0"
     }
 
+    // Keystore di debug FISSO e versionato nel repo (keystore/debug.keystore).
+    // Senza questo, ogni build (soprattutto su GitHub Actions, dove ogni run parte
+    // da una VM pulita) verrebbe firmata con una chiave di debug casuale e diversa
+    // ogni volta -> Android rifiuta l'installazione come "aggiornamento" e obbliga
+    // a disinstallare la versione precedente ("app non installata" per firma diversa).
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
