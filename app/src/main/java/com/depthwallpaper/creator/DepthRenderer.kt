@@ -122,6 +122,10 @@ object DepthRenderer {
      * dell'editor (FONTS in assets/js/app.js). Per ogni famiglia il file "bold"
      * e' opzionale: se manca, il grassetto viene sintetizzato da Android.
      */
+    // "oswald" e "bigShoulders" puntano a file chiamati "-Regular.ttf" per non
+    // toccare le chiavi gia' salvate nelle configurazioni, ma il contenuto e'
+    // stato sostituito con il peso ExtraLight: al peso normale risultavano
+    // troppo larghi.
     private val BUNDLED_FONTS: Map<String, Pair<String, String?>> = mapOf(
         "bebas" to Pair("fonts/BebasNeue-Regular.ttf", null),
         "anton" to Pair("fonts/Anton-Regular.ttf", null),

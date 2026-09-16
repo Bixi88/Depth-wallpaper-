@@ -11,8 +11,8 @@ android {
         applicationId = "com.depthwallpaper.creator"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "5.4"
+        versionCode = 10
+        versionName = "5.5"
     }
 
     // I .ttf in assets/fonts restano non compressi: caricamento piu' rapido sia

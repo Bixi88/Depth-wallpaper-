@@ -39,6 +39,9 @@
   font-display: block;
 }
 @font-face {
+  /* Il file si chiama "Regular" per compatibilita' con le chiavi esistenti,
+     ma il contenuto e' il peso ExtraLight: l'utente lo trovava troppo largo
+     al peso normale. */
   font-family: "Oswald";
   src: url("../fonts/Oswald-Regular.ttf") format("truetype");
   font-weight: 400;
@@ -60,6 +63,7 @@
   font-display: block;
 }
 @font-face {
+  /* Stesso discorso di Oswald: file "Regular" ma contenuto ExtraLight. */
   font-family: "Big Shoulders";
   src: url("../fonts/BigShoulders-Regular.ttf") format("truetype");
   font-weight: 400;
