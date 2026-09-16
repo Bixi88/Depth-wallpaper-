@@ -158,23 +158,32 @@ object DepthRenderer {
         val x = clock.x * w
         val y = clock.y * h
 
+        // Stretch non uniforme (verticale/orizzontale indipendenti): trasliamo l'origine
+        // nel punto dell'orologio e scaliamo solo gli assi richiesti, cosi' la dimensione
+        // "size" resta il riferimento e lo stretch la deforma in una sola direzione.
+        canvas.save()
+        canvas.translate(x, y)
+        canvas.scale(clock.stretchX, clock.stretchY)
+
         if (clock.mode == "time") {
             val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Calendar.getInstance().time)
             paint.textSize = sizePx
-            drawCenteredBaseline(canvas, paint, time, x, y)
+            drawCenteredBaseline(canvas, paint, time, 0f, 0f)
 
             if (clock.showDate) {
                 val dateStr = SimpleDateFormat("EEEE d MMMM", Locale.ITALIAN)
                     .format(Calendar.getInstance().time)
                     .replaceFirstChar { c -> c.titlecase(Locale.ITALIAN) }
                 paint.textSize = sizePx * 0.22f
-                drawCenteredBaseline(canvas, paint, dateStr, x, y + sizePx * 0.62f)
+                drawCenteredBaseline(canvas, paint, dateStr, 0f, sizePx * 0.62f)
             }
         } else {
             val text = clock.customText.ifBlank { "Il tuo testo" }
             paint.textSize = sizePx
-            wrapAndDrawText(canvas, paint, text, x, y, w * 0.86f, sizePx * 1.05f)
+            wrapAndDrawText(canvas, paint, text, 0f, 0f, (w * 0.86f) / clock.stretchX, sizePx * 1.05f)
         }
+
+        canvas.restore()
     }
 
     /** Paint.drawText usa la baseline: questo helper centra verticalmente come fa il canvas HTML5 (textBaseline = middle). */

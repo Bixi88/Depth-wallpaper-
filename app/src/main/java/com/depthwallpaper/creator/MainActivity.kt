@@ -8,6 +8,8 @@ import android.content.ComponentName
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -22,6 +24,10 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
+import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
+import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -116,17 +122,43 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
-            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            val bytes = readAndDownscale(uri)
             if (bytes == null) {
                 notifyImageLoaded(pendingLayer, null)
                 return
             }
-            val mime = contentResolver.getType(uri) ?: "image/png"
             val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-            notifyImageLoaded(pendingLayer, "data:$mime;base64,$base64")
+            notifyImageLoaded(pendingLayer, "data:image/jpeg;base64,$base64")
         } catch (e: Exception) {
             notifyImageLoaded(pendingLayer, null)
         }
+    }
+
+    /**
+     * Legge l'immagine scelta dalla galleria e la ridimensiona se necessario. Le foto
+     * moderne (12+ MP) appesantivano inutilmente WebView, il salvataggio e soprattutto
+     * il Live Wallpaper (causa principale del crash silenzioso -> fallback al wallpaper
+     * di sistema): qui limitiamo il lato lungo a maxSide prima di ricomprimere in JPEG.
+     */
+    private fun readAndDownscale(uri: Uri, maxSide: Int = 2000): ByteArray? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            ?: return null
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        var sampleSize = 1
+        while (bounds.outWidth / sampleSize > maxSide || bounds.outHeight / sampleSize > maxSide) {
+            sampleSize *= 2
+        }
+
+        val bitmap = contentResolver.openInputStream(uri)?.use {
+            BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sampleSize })
+        } ?: return null
+
+        val out = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        bitmap.recycle()
+        return out.toByteArray()
     }
 
     private fun notifyImageLoaded(layer: String, dataUrl: String?) {
@@ -134,6 +166,17 @@ class MainActivity : ComponentActivity() {
             val arg = if (dataUrl != null) "'${dataUrl}'" else "null"
             webView.evaluateJavascript(
                 "window.onImageLoaded && window.onImageLoaded('$layer', $arg);",
+                null
+            )
+        }
+    }
+
+    private fun notifySubjectCutout(pngDataUrl: String?, errorMessage: String?) {
+        runOnUiThread {
+            val maskArg = if (pngDataUrl != null) "'${pngDataUrl}'" else "null"
+            val errArg = if (errorMessage != null) "'${errorMessage.replace("'", "\\'")}'" else "null"
+            webView.evaluateJavascript(
+                "window.onSubjectCutout && window.onSubjectCutout($maskArg, $errArg);",
                 null
             )
         }
@@ -202,12 +245,59 @@ class MainActivity : ComponentActivity() {
         /** Chiamato dal JS quando l'utente tocca "Carica immagine" per il layer indicato. */
         @JavascriptInterface
         fun pickImage(layer: String) {
-            pendingLayer = if (layer == "fg") "fg" else "bg"
+            pendingLayer = layer.ifBlank { "bg" }
             runOnUiThread {
                 try {
                     pickImageLauncher.launch(arrayOf("image/*"))
                 } catch (e: Exception) {
                     notifyImageLoaded(pendingLayer, null)
+                }
+            }
+        }
+
+        /**
+         * Ritaglio automatico del soggetto tramite ML Kit Subject Segmentation
+         * (modello on-device scaricato via Google Play services, nessun upload verso
+         * internet). Riceve la foto scelta come data URL, restituisce a JS il PNG
+         * del solo soggetto (sfondo reso trasparente) tramite window.onSubjectCutout,
+         * cosi' l'editor puo' comporlo e l'utente rifinire i bordi col pennello.
+         */
+        @JavascriptInterface
+        fun cutoutSubject(imageDataUrl: String) {
+            runOnUiThread {
+                try {
+                    val pureBase64 = imageDataUrl.substringAfter(",", imageDataUrl)
+                    val bytes = Base64.decode(pureBase64, Base64.DEFAULT)
+                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (bitmap == null) {
+                        notifySubjectCutout(null, "Immagine non valida")
+                        return@runOnUiThread
+                    }
+
+                    val options = SubjectSegmenterOptions.Builder()
+                        .enableForegroundBitmap()
+                        .build()
+                    val segmenter = SubjectSegmentation.getClient(options)
+                    val input = InputImage.fromBitmap(bitmap, 0)
+
+                    segmenter.process(input)
+                        .addOnSuccessListener { result ->
+                            val fg = result.foregroundBitmap
+                            if (fg == null) {
+                                notifySubjectCutout(null, "Nessun soggetto riconosciuto: usa il pennello")
+                            } else {
+                                val out = ByteArrayOutputStream()
+                                fg.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                val b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                                notifySubjectCutout("data:image/png;base64,$b64", null)
+                            }
+                        }
+                        .addOnFailureListener {
+                            // Es. modello non ancora scaricato al primo avvio dopo l'installazione.
+                            notifySubjectCutout(null, "Ritaglio AI non disponibile ora: usa il pennello")
+                        }
+                } catch (e: Exception) {
+                    notifySubjectCutout(null, "Errore durante il ritaglio automatico")
                 }
             }
         }

@@ -378,6 +378,135 @@ input[type="color"]::-webkit-color-swatch { border-radius: 7px; border: none; }
   transform: translate(-50%, 0);
 }
 
+/* ---------------- RITAGLIO SOGGETTO (AI + pennello) ---------------- */
+.cutout-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: var(--bg-0);
+  display: flex;
+  flex-direction: column;
+}
+.cutout-modal.hidden { display: none; }
+
+.cutout-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.cutout-title { flex: 1; font-size: 14px; font-weight: 600; text-align: center; }
+.cutout-icon-btn {
+  background: var(--bg-3);
+  border: none;
+  color: var(--text-0);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  font-size: 14px;
+  cursor: pointer;
+}
+.cutout-apply-btn {
+  background: linear-gradient(135deg, var(--accent), #4c5bff);
+  color: white;
+  border: none;
+  padding: 9px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.cutout-canvas-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  position: relative;
+  background:
+    linear-gradient(45deg, #232330 25%, transparent 25%),
+    linear-gradient(-45deg, #232330 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #232330 75%),
+    linear-gradient(-45deg, transparent 75%, #232330 75%);
+  background-size: 24px 24px;
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0px;
+}
+
+#cutoutCanvas {
+  max-width: 100%;
+  max-height: 100%;
+  touch-action: none;
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+.cutout-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(13,13,18,0.72);
+  color: var(--text-0);
+  font-size: 13px;
+}
+.cutout-loading.hidden { display: none; }
+
+.spinner {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid var(--bg-3);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.cutout-toolbar {
+  flex-shrink: 0;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border);
+  padding: 14px 16px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.cutout-tools {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.cutout-tool-btn {
+  flex: 1;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text-1);
+  padding: 10px 6px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.cutout-tool-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.cutout-actions-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.cutout-actions-row .upload-btn { flex: 1; }
+
 /* ---------------- DASHBOARD SU SCHERMI LARGHI (tablet / landscape) ---------------- */
 @media (min-width: 760px) {
   #main-layout {

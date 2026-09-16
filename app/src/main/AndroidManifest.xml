@@ -19,6 +19,12 @@
         android:hardwareAccelerated="true"
         android:supportsRtl="true">
 
+        <!-- Scarica il modello di ritaglio soggetto (ML Kit) in background dopo
+             l'installazione da Play Store, cosi' e' gia' pronto al primo utilizzo. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="subject_segment" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

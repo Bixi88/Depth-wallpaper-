@@ -111,25 +111,63 @@ class DepthWallpaperService : WallpaperService() {
         // Caricamento configurazione + immagini
         // ---------------------------------------------------------------------------
         private fun reloadConfigAndBitmaps() {
-            val json = ConfigStore.loadConfigJson(applicationContext)
-            config = WallpaperConfig.fromJson(json)
+            try {
+                val json = ConfigStore.loadConfigJson(applicationContext)
+                config = WallpaperConfig.fromJson(json)
 
-            bgBitmap?.recycle()
-            fgBitmap?.recycle()
-            bgBitmap = decodeIfExists(ConfigStore.bgFile(applicationContext))
-            fgBitmap = decodeIfExists(ConfigStore.fgFile(applicationContext))
+                bgBitmap?.recycle()
+                fgBitmap?.recycle()
+                bgBitmap = decodeIfExists(ConfigStore.bgFile(applicationContext))
+                fgBitmap = decodeIfExists(ConfigStore.fgFile(applicationContext))
 
-            unregisterTiltSensor()
-            if (visible) registerTiltSensorIfNeeded()
+                unregisterTiltSensor()
+                if (visible) registerTiltSensorIfNeeded()
+            } catch (e: Throwable) {
+                // Non lasciare mai che un dato scritto male (config o immagini) faccia
+                // crashare il servizio: meglio uno sfondo nero che un fallback di sistema.
+                config = WallpaperConfig.default()
+            }
         }
 
+        /**
+         * Decodifica un layer SEMPRE ridimensionato allo schermo reale (mai a piena
+         * risoluzione fotocamera). Senza questo limite, una foto da 12+ MP puo' allocare
+         * decine di MB di bitmap e causare un OutOfMemoryError: il servizio crasha in
+         * modo silenzioso, la preview di sistema resta bloccata sul caricamento e, se
+         * l'utente riprova, Android torna allo sfondo predefinito del produttore.
+         */
         private fun decodeIfExists(file: java.io.File): Bitmap? {
             if (!file.exists()) return null
             return try {
-                BitmapFactory.decodeFile(file.absolutePath)
-            } catch (e: Exception) {
+                val metrics = resources.displayMetrics
+                val targetW = metrics.widthPixels.coerceAtLeast(1) * 2
+                val targetH = metrics.heightPixels.coerceAtLeast(1) * 2
+
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(file.absolutePath, bounds)
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+                val options = BitmapFactory.Options().apply {
+                    inSampleSize = calculateInSampleSize(bounds.outWidth, bounds.outHeight, targetW, targetH)
+                }
+                BitmapFactory.decodeFile(file.absolutePath, options)
+            } catch (e: Throwable) {
+                // Include OutOfMemoryError: un file corrotto o enorme non deve mai
+                // far crashare il processo del Live Wallpaper.
                 null
             }
+        }
+
+        private fun calculateInSampleSize(rawW: Int, rawH: Int, reqW: Int, reqH: Int): Int {
+            var inSampleSize = 1
+            if (rawW > reqW || rawH > reqH) {
+                val halfW = rawW / 2
+                val halfH = rawH / 2
+                while (halfW / inSampleSize >= reqW && halfH / inSampleSize >= reqH) {
+                    inSampleSize *= 2
+                }
+            }
+            return inSampleSize
         }
 
         // ---------------------------------------------------------------------------
@@ -178,8 +216,9 @@ class DepthWallpaperService : WallpaperService() {
                         parallaxX, parallaxY
                     )
                 }
-            } catch (e: Exception) {
-                // Superficie non pronta o già rilasciata: ignoriamo il singolo frame.
+            } catch (e: Throwable) {
+                // Superficie non pronta, già rilasciata, o errore di disegno: ignoriamo
+                // il singolo frame invece di far crashare l'intero servizio.
             } finally {
                 if (canvas != null) {
                     try {

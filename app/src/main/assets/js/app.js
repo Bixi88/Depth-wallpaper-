@@ -33,6 +33,8 @@
       opacity: 1,
       x: 0.5, // 0..1 relativo alla larghezza
       y: 0.35, // 0..1 relativo all'altezza
+      stretchX: 1, // 1 = normale; >1 allarga orizzontalmente
+      stretchY: 1, // 1 = normale; >1 allunga verticalmente
     },
     bgDim: 0, // 0..100
     parallaxEnabled: true,
@@ -120,19 +122,25 @@
     const x = c.x * w;
     const y = c.y * h;
 
+    // Stretch non uniforme: trasliamo l'origine nel punto dell'orologio e scaliamo
+    // solo gli assi richiesti, cosi' "size" resta il riferimento e lo stretch deforma
+    // in una sola direzione (verticale o orizzontale) senza toccare l'altra.
+    context.translate(x, y);
+    context.scale(c.stretchX || 1, c.stretchY || 1);
+
     if (c.mode === "time") {
       const { time, date } = formatTimeParts();
       context.font = `${weight} ${c.size}px ${fontFamily}`;
-      context.fillText(time, x, y);
+      context.fillText(time, 0, 0);
 
       if (c.showDate) {
         context.font = `${weight} ${Math.round(c.size * 0.22)}px ${fontFamily}`;
-        context.fillText(date, x, y + c.size * 0.62);
+        context.fillText(date, 0, c.size * 0.62);
       }
     } else {
       const text = c.customText && c.customText.trim().length > 0 ? c.customText : "Il tuo testo";
       context.font = `${weight} ${c.size}px ${fontFamily}`;
-      wrapAndDrawText(context, text, x, y, w * 0.86, c.size * 1.05);
+      wrapAndDrawText(context, text, 0, 0, (w * 0.86) / (c.stretchX || 1), c.size * 1.05);
     }
 
     context.restore();
@@ -249,7 +257,9 @@
   });
 
   document.getElementById("btnUploadBg").addEventListener("click", () => requestImage("bg"));
-  document.getElementById("btnUploadFg").addEventListener("click", () => requestImage("fg"));
+  // Il soggetto non si carica piu' gia' ritagliato: si sceglie una foto qualsiasi e la
+  // isoliamo nell'editor di ritaglio (AI + pennello), vedi piu' sotto.
+  document.getElementById("btnUploadFg").addEventListener("click", () => requestImage("fg-source"));
 
   /** Chiamata dal lato nativo (Kotlin) quando un'immagine e' stata selezionata e letta. */
   window.onImageLoaded = function (layer, dataUrl) {
@@ -257,24 +267,192 @@
       showToast("Nessuna immagine selezionata");
       return;
     }
+    if (layer === "fg-source") {
+      openCutoutEditor(dataUrl);
+      return;
+    }
     const img = new Image();
     img.onload = () => {
-      if (layer === "bg") {
-        state.bg.img = img;
-        state.bg.dataUrl = dataUrl;
-        document.getElementById("thumbBg").style.backgroundImage = `url(${dataUrl})`;
-        document.getElementById("thumbBg").innerHTML = "";
-      } else {
-        state.fg.img = img;
-        state.fg.dataUrl = dataUrl;
-        document.getElementById("thumbFg").style.backgroundImage = `url(${dataUrl})`;
-        document.getElementById("thumbFg").innerHTML = "";
-      }
+      state.bg.img = img;
+      state.bg.dataUrl = dataUrl;
+      document.getElementById("thumbBg").style.backgroundImage = `url(${dataUrl})`;
+      document.getElementById("thumbBg").innerHTML = "";
       renderPreview();
     };
     img.onerror = () => showToast("Immagine non valida");
     img.src = dataUrl;
   };
+
+  // ===========================================================================
+  // RITAGLIO SOGGETTO: ML Kit on-device (AI) + pennello/gomma di rifinitura
+  // ===========================================================================
+  const cutoutModal = document.getElementById("cutoutModal");
+  const cutoutCanvas = document.getElementById("cutoutCanvas");
+  const cutoutCtx = cutoutCanvas.getContext("2d");
+  const cutoutLoading = document.getElementById("cutoutLoading");
+  const CUTOUT_MAX_SIDE = 1400; // limite di lavoro: resta fluido su schermi mobili
+
+  let cutoutSourceCanvas = null; // <canvas> offscreen con la foto originale (mai modificata)
+  let cutoutMaskCanvas = null;   // <canvas> offscreen: l'alpha qui = "quanto e' visibile"
+  let cutoutTool = "brush";      // "brush" (ripristina) | "eraser" (rimuove)
+  let cutoutBrushSize = 30;
+  let cutoutDrawing = false;
+
+  function openCutoutEditor(dataUrl) {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      if (Math.max(w, h) > CUTOUT_MAX_SIDE) {
+        const s = CUTOUT_MAX_SIDE / Math.max(w, h);
+        w = Math.round(w * s);
+        h = Math.round(h * s);
+      }
+
+      cutoutSourceCanvas = document.createElement("canvas");
+      cutoutSourceCanvas.width = w;
+      cutoutSourceCanvas.height = h;
+      cutoutSourceCanvas.getContext("2d").drawImage(img, 0, 0, w, h);
+
+      // Di default tutto il soggetto e' visibile, finche' l'AI (o l'utente con la
+      // gomma) non rimuove lo sfondo: cosi' l'editor resta utilizzabile anche se
+      // il ritaglio automatico non e' disponibile (es. su desktop di test).
+      cutoutMaskCanvas = document.createElement("canvas");
+      cutoutMaskCanvas.width = w;
+      cutoutMaskCanvas.height = h;
+      const mctx = cutoutMaskCanvas.getContext("2d");
+      mctx.fillStyle = "#ffffff";
+      mctx.fillRect(0, 0, w, h);
+
+      cutoutCanvas.width = w;
+      cutoutCanvas.height = h;
+
+      cutoutModal.classList.remove("hidden");
+      renderCutoutPreview();
+      requestAiCutout();
+    };
+    img.onerror = () => showToast("Immagine non valida");
+    img.src = dataUrl;
+  }
+
+  function requestAiCutout() {
+    if (!isNative || !cutoutSourceCanvas) {
+      showToast("Il ritaglio AI richiede l'app Android: usa il pennello per ritagliare a mano");
+      return;
+    }
+    cutoutLoading.classList.remove("hidden");
+    Android.cutoutSubject(cutoutSourceCanvas.toDataURL("image/jpeg", 0.92));
+  }
+
+  /** Chiamata dal lato nativo (Kotlin) col risultato della segmentazione AI (ML Kit). */
+  window.onSubjectCutout = function (maskDataUrl, errorMessage) {
+    cutoutLoading.classList.add("hidden");
+    if (!maskDataUrl) {
+      showToast(errorMessage || "Soggetto non riconosciuto: usa il pennello");
+      return;
+    }
+    const maskImg = new Image();
+    maskImg.onload = () => {
+      const mctx = cutoutMaskCanvas.getContext("2d");
+      mctx.clearRect(0, 0, cutoutMaskCanvas.width, cutoutMaskCanvas.height);
+      mctx.drawImage(maskImg, 0, 0, cutoutMaskCanvas.width, cutoutMaskCanvas.height);
+      renderCutoutPreview();
+    };
+    maskImg.src = maskDataUrl;
+  };
+
+  /** Ricompone: foto originale "tagliata" dall'alpha della mask (destination-in). */
+  function renderCutoutPreview() {
+    cutoutCtx.clearRect(0, 0, cutoutCanvas.width, cutoutCanvas.height);
+    cutoutCtx.drawImage(cutoutSourceCanvas, 0, 0);
+    cutoutCtx.globalCompositeOperation = "destination-in";
+    cutoutCtx.drawImage(cutoutMaskCanvas, 0, 0);
+    cutoutCtx.globalCompositeOperation = "source-over";
+  }
+
+  function cutoutCanvasPoint(evt) {
+    const rect = cutoutCanvas.getBoundingClientRect();
+    const point = evt.touches ? evt.touches[0] : evt;
+    const x = ((point.clientX - rect.left) / rect.width) * cutoutCanvas.width;
+    const y = ((point.clientY - rect.top) / rect.height) * cutoutCanvas.height;
+    return { x, y };
+  }
+
+  function cutoutPaintAt(x, y) {
+    const mctx = cutoutMaskCanvas.getContext("2d");
+    // Pennello = ripristina (aggiunge di nuovo alpha piena); Gomma = rimuove (destination-out).
+    mctx.globalCompositeOperation = cutoutTool === "eraser" ? "destination-out" : "source-over";
+    mctx.fillStyle = "#ffffff";
+    mctx.beginPath();
+    mctx.arc(x, y, cutoutBrushSize / 2, 0, Math.PI * 2);
+    mctx.fill();
+    mctx.globalCompositeOperation = "source-over";
+    renderCutoutPreview();
+  }
+
+  function cutoutPointerDown(evt) {
+    if (!cutoutSourceCanvas) return;
+    cutoutDrawing = true;
+    const { x, y } = cutoutCanvasPoint(evt);
+    cutoutPaintAt(x, y);
+    evt.preventDefault();
+  }
+  function cutoutPointerMove(evt) {
+    if (!cutoutDrawing) return;
+    const { x, y } = cutoutCanvasPoint(evt);
+    cutoutPaintAt(x, y);
+    evt.preventDefault();
+  }
+  function cutoutPointerUp() { cutoutDrawing = false; }
+
+  cutoutCanvas.addEventListener("mousedown", cutoutPointerDown);
+  cutoutCanvas.addEventListener("mousemove", cutoutPointerMove);
+  window.addEventListener("mouseup", cutoutPointerUp);
+  cutoutCanvas.addEventListener("touchstart", cutoutPointerDown, { passive: false });
+  cutoutCanvas.addEventListener("touchmove", cutoutPointerMove, { passive: false });
+  cutoutCanvas.addEventListener("touchend", cutoutPointerUp);
+
+  document.querySelectorAll(".cutout-tool-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".cutout-tool-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      cutoutTool = btn.dataset.tool;
+    });
+  });
+
+  document.getElementById("cutoutBrushRange").addEventListener("input", (e) => {
+    cutoutBrushSize = Number(e.target.value);
+    document.getElementById("cutoutBrushValue").textContent = cutoutBrushSize;
+  });
+
+  document.getElementById("cutoutResetBtn").addEventListener("click", requestAiCutout);
+
+  document.getElementById("cutoutClearBtn").addEventListener("click", () => {
+    const mctx = cutoutMaskCanvas.getContext("2d");
+    mctx.clearRect(0, 0, cutoutMaskCanvas.width, cutoutMaskCanvas.height);
+    renderCutoutPreview();
+  });
+
+  document.getElementById("cutoutCancelBtn").addEventListener("click", () => {
+    cutoutModal.classList.add("hidden");
+  });
+
+  document.getElementById("cutoutApplyBtn").addEventListener("click", () => {
+    if (!cutoutSourceCanvas) {
+      cutoutModal.classList.add("hidden");
+      return;
+    }
+    const dataUrl = cutoutCanvas.toDataURL("image/png");
+    const img = new Image();
+    img.onload = () => {
+      state.fg.img = img;
+      state.fg.dataUrl = dataUrl;
+      document.getElementById("thumbFg").style.backgroundImage = `url(${dataUrl})`;
+      document.getElementById("thumbFg").innerHTML = "";
+      cutoutModal.classList.add("hidden");
+      renderPreview();
+    };
+    img.src = dataUrl;
+  });
 
   // ===========================================================================
   // TAB OROLOGIO: controlli
@@ -317,6 +495,8 @@
   bindRange("opacityRange", "opacityValue", (v) => { state.clock.opacity = v / 100; }, (v) => v + "%");
   bindRange("posXRange", "posXValue", (v) => { state.clock.x = v / 100; }, (v) => v + "%");
   bindRange("posYRange", "posYValue", (v) => { state.clock.y = v / 100; }, (v) => v + "%");
+  bindRange("stretchXRange", "stretchXValue", (v) => { state.clock.stretchX = v / 100; }, (v) => v + "%");
+  bindRange("stretchYRange", "stretchYValue", (v) => { state.clock.stretchY = v / 100; }, (v) => v + "%");
 
   document.getElementById("colorPicker").addEventListener("input", (e) => {
     state.clock.color = e.target.value;
@@ -439,6 +619,8 @@
         opacity: state.clock.opacity,
         x: state.clock.x,
         y: state.clock.y,
+        stretchX: state.clock.stretchX,
+        stretchY: state.clock.stretchY,
       },
       bgDim: state.bgDim,
       bgScale: state.bg.scale,

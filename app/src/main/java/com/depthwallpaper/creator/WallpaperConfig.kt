@@ -16,7 +16,9 @@ data class ClockConfig(
     val color: String,      // "#rrggbb"
     val opacity: Float,     // 0..1
     val x: Float,           // 0..1 relativo alla larghezza
-    val y: Float            // 0..1 relativo all'altezza
+    val y: Float,           // 0..1 relativo all'altezza
+    val stretchX: Float,    // 1 = normale; >1 allarga orizzontalmente, <1 restringe
+    val stretchY: Float     // 1 = normale; >1 allunga verticalmente, <1 schiaccia
 )
 
 /** Configurazione completa dei 3 layer, cosi' come esportata dall'editor. */
@@ -45,7 +47,9 @@ data class WallpaperConfig(
                 color = "#ffffff",
                 opacity = 1f,
                 x = 0.5f,
-                y = 0.35f
+                y = 0.35f,
+                stretchX = 1f,
+                stretchY = 1f
             ),
             bgDim = 0f,
             bgScale = 1f,
@@ -72,7 +76,9 @@ data class WallpaperConfig(
                     color = c.optString("color", "#ffffff"),
                     opacity = c.optDouble("opacity", 1.0).toFloat(),
                     x = c.optDouble("x", 0.5).toFloat(),
-                    y = c.optDouble("y", 0.35).toFloat()
+                    y = c.optDouble("y", 0.35).toFloat(),
+                    stretchX = c.optDouble("stretchX", 1.0).toFloat(),
+                    stretchY = c.optDouble("stretchY", 1.0).toFloat()
                 )
                 WallpaperConfig(
                     clock = clock,

@@ -60,12 +60,12 @@
           </div>
 
           <div class="field-group">
-            <label>Livello 2 &middot; Soggetto (PNG trasparente)</label>
+            <label>Livello 2 &middot; Soggetto</label>
             <div class="upload-row">
-              <button class="upload-btn" id="btnUploadFg">Carica soggetto ritagliato</button>
+              <button class="upload-btn" id="btnUploadFg">Ritaglia soggetto (AI + pennello)</button>
               <div class="thumb checker" id="thumbFg"><span>vuoto</span></div>
             </div>
-            <p class="hint-text">Per l'effetto profondità il soggetto deve avere lo sfondo trasparente (PNG). Le parti trasparenti lasceranno intravedere l'orologio sottostante.</p>
+            <p class="hint-text">Scegli una foto qualsiasi: il soggetto principale viene isolato in automatico da un modello AI on-device (nessun upload su internet); puoi poi rifinire i bordi con pennello e gomma prima di applicarlo.</p>
           </div>
         </div>
 
@@ -134,6 +134,18 @@
             <label>Posizione verticale <span class="value-badge" id="posYValue">35%</span></label>
             <input type="range" id="posYRange" min="0" max="100" value="35" />
           </div>
+
+          <div class="field-group section-title">Deformazione</div>
+          <div class="field-group">
+            <label>Stretch verticale <span class="value-badge" id="stretchYValue">100%</span></label>
+            <input type="range" id="stretchYRange" min="50" max="200" value="100" />
+            <p class="hint-text">Allunga l'orologio verso l'alto/basso senza cambiarne la larghezza.</p>
+          </div>
+          <div class="field-group">
+            <label>Stretch orizzontale <span class="value-badge" id="stretchXValue">100%</span></label>
+            <input type="range" id="stretchXRange" min="50" max="200" value="100" />
+            <p class="hint-text">Allarga l'orologio in larghezza senza cambiarne l'altezza.</p>
+          </div>
         </div>
 
         <!-- ---- TAB: EFFETTI ---- -->
@@ -201,6 +213,37 @@
 
 <!-- input file nascosto: usato solo per il fallback "modalità browser" (test su desktop) -->
 <input type="file" id="hiddenFileInput" accept="image/*" style="display:none;" />
+
+<!-- ============== EDITOR RITAGLIO SOGGETTO (AI + pennello) ============== -->
+<div id="cutoutModal" class="cutout-modal hidden">
+  <div class="cutout-header">
+    <button id="cutoutCancelBtn" class="cutout-icon-btn" title="Annulla">&#10005;</button>
+    <span class="cutout-title">Ritaglia soggetto</span>
+    <button id="cutoutApplyBtn" class="cutout-apply-btn">Applica</button>
+  </div>
+  <div class="cutout-canvas-wrap">
+    <canvas id="cutoutCanvas"></canvas>
+    <div id="cutoutLoading" class="cutout-loading hidden">
+      <div class="spinner"></div>
+      <span>Analisi AI del soggetto&hellip;</span>
+    </div>
+  </div>
+  <div class="cutout-toolbar">
+    <div class="cutout-tools">
+      <button class="cutout-tool-btn active" data-tool="brush">&#10022; Pennello (ripristina)</button>
+      <button class="cutout-tool-btn" data-tool="eraser">&#9003; Gomma (rimuovi)</button>
+    </div>
+    <div class="field-group">
+      <label>Dimensione pennello <span class="value-badge" id="cutoutBrushValue">30</span></label>
+      <input type="range" id="cutoutBrushRange" min="6" max="120" value="30" />
+    </div>
+    <div class="cutout-actions-row">
+      <button id="cutoutResetBtn" class="upload-btn ghost">Ricomincia da AI</button>
+      <button id="cutoutClearBtn" class="upload-btn ghost">Svuota tutto</button>
+    </div>
+    <p class="hint-text center">Pennello = ripristina il soggetto &middot; Gomma = rimuovi lo sfondo residuo. Tocca e trascina sull'anteprima.</p>
+  </div>
+</div>
 
 <script src="js/app.js"></script>
 </body>
