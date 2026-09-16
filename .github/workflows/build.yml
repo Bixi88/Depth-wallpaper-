@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -48,3 +51,10 @@ jobs:
         with:
           name: depth-wallpaper-debug
           path: app/build/outputs/apk/debug/*.apk
+
+      - name: Pubblica Release con APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build #${{ github.run_number }}
+          files: app/build/outputs/apk/debug/*.apk
