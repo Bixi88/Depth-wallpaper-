@@ -458,7 +458,12 @@
     if (s.setter) s.setter(v);
     if (s.badge) s.badge.textContent = s.formatter ? s.formatter(v) : String(v);
     paintSliderFill(s, v);
-    if (doRender) renderPreview();
+    // Con l'editor di ritaglio aperto l'anteprima principale e' nascosta sotto al
+    // modal: ridisegnarla ad ogni campione di trascinamento (oltre al gia' costoso
+    // ridisegno del setter dello slider stesso) raddoppiava il lavoro sul thread JS.
+    // Durante il trascinamento di "Contorno ritaglio"/"Bordo bianco adesivo" questo
+    // bastava a saturare il thread e bloccare l'intera WebView (persino "Applica").
+    if (doRender && (!cutoutModal || cutoutModal.classList.contains("hidden"))) renderPreview();
   }
 
   function setSlider(rangeId, value) {
@@ -725,6 +730,40 @@
   let cutoutMaskOffsetPx = 0;
   let cutoutOutlineWidthPx = 0;
 
+  // Zoom/pan del canvas di ritaglio (pizzico con due dita) e mirino di precisione
+  // per il pennello: vedi sezione dedicata piu' sotto.
+  let cutoutZoom = 1;
+  let cutoutPanX = 0;
+  let cutoutPanY = 0;
+  const CUTOUT_MAX_ZOOM = 6;
+
+  function applyCutoutTransform() {
+    cutoutCanvas.style.transform = `translate(${cutoutPanX}px, ${cutoutPanY}px) scale(${cutoutZoom})`;
+  }
+
+  function resetCutoutView() {
+    cutoutZoom = 1;
+    cutoutPanX = 0;
+    cutoutPanY = 0;
+    applyCutoutTransform();
+    const btn = document.getElementById("cutoutZoomResetBtn");
+    if (btn) btn.classList.add("hidden");
+  }
+
+  let cutoutRenderScheduled = false;
+  /** Raggruppa in un solo ricalcolo per frame le tante notifiche ravvicinate che un
+   *  trascinamento genera (decine di eventi touchmove): erodeDilateAlpha lavora
+   *  sull'intera maschera, e ripeterlo ad ogni singolo campione e' cio' che mandava
+   *  in stallo la WebView su "Contorno ritaglio" e "Bordo bianco adesivo". */
+  function scheduleCutoutRender() {
+    if (cutoutRenderScheduled) return;
+    cutoutRenderScheduled = true;
+    requestAnimationFrame(() => {
+      cutoutRenderScheduled = false;
+      renderCutoutPreview();
+    });
+  }
+
   function openCutoutEditor(dataUrl) {
     const img = new Image();
     img.onload = () => {
@@ -754,6 +793,7 @@
       cutoutOutlineWidthPx = 0;
       setSlider("cutoutOffsetRange", 0);
       setSlider("cutoutOutlineRange", 0);
+      resetCutoutView();
 
       cutoutModal.classList.remove("hidden");
       renderCutoutPreview();
@@ -914,23 +954,121 @@
     mctx.arc(x, y, cutoutBrushSize / 2, 0, Math.PI * 2);
     mctx.fill();
     mctx.globalCompositeOperation = "source-over";
-    renderCutoutPreview();
+    scheduleCutoutRender();
   }
+
+  // ---------------------------------------------------------------------------
+  // Mirino di precisione: mentre disegni col pennello, il dito copre esattamente
+  // il punto che stai toccando. Qui mostriamo un cerchietto ingrandito "a lente",
+  // spostato sopra al dito, con al centro un mirino + il contorno reale del
+  // pennello: cosi' si vede cosa si sta per cancellare/ripristinare prima di farlo.
+  // ---------------------------------------------------------------------------
+  const cutoutLoupe = document.getElementById("cutoutLoupe");
+  const cutoutLoupeCtx = cutoutLoupe ? cutoutLoupe.getContext("2d") : null;
+  const LOUPE_SIZE = 120;
+  const LOUPE_ZOOM = 3;
+
+  function showCutoutLoupe(evt, canvasPoint) {
+    if (!cutoutLoupeCtx) return;
+    const p = evt.touches ? evt.touches[0] : evt;
+    const cropSide = LOUPE_SIZE / LOUPE_ZOOM;
+
+    cutoutLoupeCtx.clearRect(0, 0, LOUPE_SIZE, LOUPE_SIZE);
+    cutoutLoupeCtx.fillStyle = "#1a1a22";
+    cutoutLoupeCtx.fillRect(0, 0, LOUPE_SIZE, LOUPE_SIZE);
+    cutoutLoupeCtx.drawImage(
+      cutoutCanvas,
+      canvasPoint.x - cropSide / 2, canvasPoint.y - cropSide / 2, cropSide, cropSide,
+      0, 0, LOUPE_SIZE, LOUPE_SIZE
+    );
+
+    cutoutLoupeCtx.strokeStyle = cutoutTool === "eraser" ? "#ff5470" : "#5ee6c8";
+    cutoutLoupeCtx.lineWidth = 2;
+    cutoutLoupeCtx.beginPath();
+    cutoutLoupeCtx.arc(LOUPE_SIZE / 2, LOUPE_SIZE / 2, (cutoutBrushSize / 2) * LOUPE_ZOOM, 0, Math.PI * 2);
+    cutoutLoupeCtx.stroke();
+    cutoutLoupeCtx.beginPath();
+    cutoutLoupeCtx.moveTo(LOUPE_SIZE / 2 - 8, LOUPE_SIZE / 2);
+    cutoutLoupeCtx.lineTo(LOUPE_SIZE / 2 + 8, LOUPE_SIZE / 2);
+    cutoutLoupeCtx.moveTo(LOUPE_SIZE / 2, LOUPE_SIZE / 2 - 8);
+    cutoutLoupeCtx.lineTo(LOUPE_SIZE / 2, LOUPE_SIZE / 2 + 8);
+    cutoutLoupeCtx.stroke();
+
+    // Posizionata sopra al dito (in coordinate di pagina): se sei troppo vicino al
+    // bordo alto dello schermo, la mostriamo sotto invece che farla uscire dallo schermo.
+    const FINGER_OFFSET = 90;
+    let left = p.clientX - LOUPE_SIZE / 2;
+    let top = p.clientY - LOUPE_SIZE - FINGER_OFFSET;
+    if (top < 8) top = p.clientY + FINGER_OFFSET;
+    left = Math.max(8, Math.min(window.innerWidth - LOUPE_SIZE - 8, left));
+    cutoutLoupe.style.left = left + "px";
+    cutoutLoupe.style.top = top + "px";
+    cutoutLoupe.classList.remove("hidden");
+  }
+
+  function hideCutoutLoupe() {
+    if (cutoutLoupe) cutoutLoupe.classList.add("hidden");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pizzico con due dita per zoomare/spostare il canvas (per rifinire bene i
+  // bordi), un dito solo per disegnare col pennello/gomma.
+  // ---------------------------------------------------------------------------
+  let cutoutPinch = null;
+
+  function touchDist(t0, t1) { return Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY); }
+  function touchMid(t0, t1) { return { x: (t0.clientX + t1.clientX) / 2, y: (t0.clientY + t1.clientY) / 2 }; }
 
   function cutoutPointerDown(evt) {
     if (!cutoutSourceCanvas) return;
+    if (evt.touches && evt.touches.length >= 2) {
+      cutoutDrawing = false;
+      hideCutoutLoupe();
+      const [t0, t1] = evt.touches;
+      cutoutPinch = {
+        startDist: touchDist(t0, t1),
+        startZoom: cutoutZoom,
+        startPanX: cutoutPanX,
+        startPanY: cutoutPanY,
+        startMid: touchMid(t0, t1),
+      };
+      evt.preventDefault();
+      return;
+    }
     cutoutDrawing = true;
     const p = cutoutCanvasPoint(evt);
     cutoutPaintAt(p.x, p.y);
+    showCutoutLoupe(evt, p);
     evt.preventDefault();
   }
+
   function cutoutPointerMove(evt) {
+    if (cutoutPinch && evt.touches && evt.touches.length >= 2) {
+      const [t0, t1] = evt.touches;
+      const dist = touchDist(t0, t1);
+      const mid = touchMid(t0, t1);
+      cutoutZoom = Math.min(CUTOUT_MAX_ZOOM, Math.max(1, cutoutPinch.startZoom * (dist / cutoutPinch.startDist)));
+      cutoutPanX = cutoutPinch.startPanX + (mid.x - cutoutPinch.startMid.x);
+      cutoutPanY = cutoutPinch.startPanY + (mid.y - cutoutPinch.startMid.y);
+      applyCutoutTransform();
+      const btn = document.getElementById("cutoutZoomResetBtn");
+      if (btn) btn.classList.toggle("hidden", cutoutZoom <= 1.03);
+      evt.preventDefault();
+      return;
+    }
     if (!cutoutDrawing) return;
     const p = cutoutCanvasPoint(evt);
     cutoutPaintAt(p.x, p.y);
+    showCutoutLoupe(evt, p);
     evt.preventDefault();
   }
-  function cutoutPointerUp() { cutoutDrawing = false; }
+
+  function cutoutPointerUp(evt) {
+    if (evt && evt.touches && evt.touches.length >= 2) return; // resta un dito nel pizzico
+    cutoutPinch = null;
+    cutoutDrawing = false;
+    hideCutoutLoupe();
+  }
 
   cutoutCanvas.addEventListener("mousedown", cutoutPointerDown);
   cutoutCanvas.addEventListener("mousemove", cutoutPointerMove);
@@ -938,6 +1076,10 @@
   cutoutCanvas.addEventListener("touchstart", cutoutPointerDown, { passive: false });
   cutoutCanvas.addEventListener("touchmove", cutoutPointerMove, { passive: false });
   cutoutCanvas.addEventListener("touchend", cutoutPointerUp);
+  cutoutCanvas.addEventListener("touchcancel", cutoutPointerUp);
+
+  const cutoutZoomResetBtn = document.getElementById("cutoutZoomResetBtn");
+  if (cutoutZoomResetBtn) cutoutZoomResetBtn.addEventListener("click", resetCutoutView);
 
   document.querySelectorAll(".cutout-tool-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -950,12 +1092,12 @@
   bindRange("cutoutBrushRange", "cutoutBrushValue", (v) => { cutoutBrushSize = v; });
   bindRange(
     "cutoutOffsetRange", "cutoutOffsetValue",
-    (v) => { cutoutMaskOffsetPx = v; renderCutoutPreview(); },
+    (v) => { cutoutMaskOffsetPx = v; scheduleCutoutRender(); },
     (v) => (v > 0 ? "+" : "") + v + " px"
   );
   bindRange(
     "cutoutOutlineRange", "cutoutOutlineValue",
-    (v) => { cutoutOutlineWidthPx = v; renderCutoutPreview(); },
+    (v) => { cutoutOutlineWidthPx = v; scheduleCutoutRender(); },
     (v) => v + " px"
   );
 

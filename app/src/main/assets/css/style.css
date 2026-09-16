@@ -687,6 +687,7 @@ input[type="color"]::-webkit-color-swatch { border-radius: 7px; border: none; }
   justify-content: center;
   padding: 14px;
   position: relative;
+  overflow: hidden;
   background:
     linear-gradient(45deg, #232330 25%, transparent 25%),
     linear-gradient(-45deg, #232330 25%, transparent 25%),
@@ -702,7 +703,39 @@ input[type="color"]::-webkit-color-swatch { border-radius: 7px; border: none; }
   touch-action: none;
   border-radius: 14px;
   box-shadow: 0 0 0 1px var(--border);
+  transform-origin: center center;
+  will-change: transform;
 }
+
+.cutout-zoom-reset {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  z-index: 5;
+  background: rgba(13, 13, 18, 0.78);
+  color: var(--text-0);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.cutout-zoom-reset.hidden { display: none; }
+
+/* Lente di ingrandimento mostrata sopra al dito mentre si disegna col pennello:
+   permette di "prendere la mira" senza che il dito copra il punto toccato. */
+.cutout-loupe {
+  position: fixed;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  z-index: 600;
+}
+.cutout-loupe.hidden { display: none; }
 
 .cutout-loading {
   position: absolute;

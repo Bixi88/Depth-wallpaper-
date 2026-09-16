@@ -444,16 +444,19 @@
   </div>
   <div class="cutout-canvas-wrap">
     <canvas id="cutoutCanvas"></canvas>
+    <button id="cutoutZoomResetBtn" class="cutout-zoom-reset hidden" title="Reimposta zoom">1:1</button>
     <div id="cutoutLoading" class="cutout-loading hidden">
       <div class="spinner"></div>
       <span>Analisi AI del soggetto&hellip;</span>
     </div>
   </div>
+  <canvas id="cutoutLoupe" class="cutout-loupe hidden" width="120" height="120"></canvas>
   <div class="cutout-toolbar">
     <div class="cutout-tools">
       <button class="cutout-tool-btn active" data-tool="brush">&#10022; Pennello (ripristina)</button>
       <button class="cutout-tool-btn" data-tool="eraser">&#9003; Gomma (rimuovi)</button>
     </div>
+    <p class="hint-text center">Un dito = disegna &middot; due dita = zoom/sposta l'immagine</p>
     <div class="field-group">
       <label>Dimensione pennello <span class="value-badge" id="cutoutBrushValue">30</span></label>
       <input type="range" id="cutoutBrushRange" min="6" max="120" value="30" data-center="30" />
