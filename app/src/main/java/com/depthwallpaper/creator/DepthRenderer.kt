@@ -41,7 +41,7 @@ object DepthRenderer {
         if (bg != null) {
             canvas.save()
             canvas.translate(parallaxX * w * 0.012f, parallaxY * h * 0.012f)
-            drawCover(canvas, bg, w, h, config.bgScale, config.bgOffX, config.bgOffY)
+            drawCover(canvas, bg, w, h, config.bgScale, config.bgOffX, config.bgOffY, config.bgRotation)
             canvas.restore()
         }
 
@@ -61,7 +61,7 @@ object DepthRenderer {
         if (fg != null) {
             canvas.save()
             canvas.translate(parallaxX * w * 0.05f, parallaxY * h * 0.05f)
-            drawSubjectContain(canvas, fg, w, h, config.fgScale, config.fgOffX, config.fgOffY)
+            drawSubjectContain(canvas, fg, w, h, config.fgScale, config.fgOffX, config.fgOffY, config.fgRotation)
             canvas.restore()
         }
     }
@@ -76,7 +76,8 @@ object DepthRenderer {
         rectH: Float,
         scale: Float,
         offXFrac: Float,
-        offYFrac: Float
+        offYFrac: Float,
+        rotationDeg: Float
     ) {
         val imgRatio = bmp.width.toFloat() / bmp.height.toFloat()
         val rectRatio = rectW / rectH
@@ -97,8 +98,12 @@ object DepthRenderer {
         val cx = rectW / 2f + offXFrac * maxOffX * 0.5f
         val cy = rectH / 2f + offYFrac * maxOffY * 0.5f
 
-        val dst = android.graphics.RectF(cx - drawW / 2f, cy - drawH / 2f, cx + drawW / 2f, cy + drawH / 2f)
+        canvas.save()
+        canvas.translate(cx, cy)
+        canvas.rotate(rotationDeg)
+        val dst = android.graphics.RectF(-drawW / 2f, -drawH / 2f, drawW / 2f, drawH / 2f)
         canvas.drawBitmap(bmp, null, dst, null)
+        canvas.restore()
     }
 
     // -------------------------------------------------------------------------------
@@ -111,7 +116,8 @@ object DepthRenderer {
         rectH: Float,
         scale: Float,
         offXFrac: Float,
-        offYFrac: Float
+        offYFrac: Float,
+        rotationDeg: Float
     ) {
         val imgRatio = bmp.width.toFloat() / bmp.height.toFloat()
         var drawW = rectW * scale
@@ -126,8 +132,12 @@ object DepthRenderer {
         val baseY = rectH - drawH * 0.42f
         val cy = baseY + offYFrac * rectH * 0.3f
 
-        val dst = android.graphics.RectF(cx - drawW / 2f, cy - drawH / 2f, cx + drawW / 2f, cy + drawH / 2f)
+        canvas.save()
+        canvas.translate(cx, cy)
+        canvas.rotate(rotationDeg)
+        val dst = android.graphics.RectF(-drawW / 2f, -drawH / 2f, drawW / 2f, drawH / 2f)
         canvas.drawBitmap(bmp, null, dst, null)
+        canvas.restore()
     }
 
     // -------------------------------------------------------------------------------

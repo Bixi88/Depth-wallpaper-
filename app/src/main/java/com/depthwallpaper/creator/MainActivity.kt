@@ -2,6 +2,7 @@ package com.depthwallpaper.creator
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.WallpaperManager
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
@@ -52,7 +53,8 @@ class MainActivity : ComponentActivity() {
     private var pendingSaveFileName: String? = null
 
     private val pickImageLauncher =
-        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
             handlePickedImage(uri)
         }
 
@@ -258,7 +260,15 @@ class MainActivity : ComponentActivity() {
             pendingLayer = layer.ifBlank { "bg" }
             runOnUiThread {
                 try {
-                    pickImageLauncher.launch(arrayOf("image/*"))
+                    // ACTION_GET_CONTENT dentro un chooser esplicito mostra TUTTE le app in
+                    // grado di fornire un'immagine (Galleria, Google Foto, Files, WhatsApp...),
+                    // a differenza di ACTION_OPEN_DOCUMENT che elenca solo i provider SAF
+                    // registrati come DocumentsProvider (spesso solo il picker di sistema).
+                    val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                        type = "image/*"
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                    }
+                    pickImageLauncher.launch(Intent.createChooser(intent, "Scegli immagine da"))
                 } catch (e: Exception) {
                     android.util.Log.e("DepthWallpaper", "Impossibile aprire il selettore immagini", e)
                     notifyImageLoaded(pendingLayer, null, "Impossibile aprire il selettore immagini: ${e.message}")

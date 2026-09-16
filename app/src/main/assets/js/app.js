@@ -20,8 +20,8 @@
   };
 
   const state = {
-    bg: { img: null, dataUrl: null, scale: 1, offX: 0, offY: 0 },
-    fg: { img: null, dataUrl: null, scale: 1, offX: 0, offY: 0 },
+    bg: { img: null, dataUrl: null, scale: 1, offX: 0, offY: 0, rotation: 0 },
+    fg: { img: null, dataUrl: null, scale: 1, offX: 0, offY: 0, rotation: 0 },
     clock: {
       mode: "time", // "time" | "custom"
       customText: "",
@@ -54,8 +54,8 @@
   // RENDERING
   // ===========================================================================
 
-  /** Disegna un'immagine in modalita' "cover" (riempie tutto il rettangolo). */
-  function drawCover(context, img, rectW, rectH, scale, offXFrac, offYFrac) {
+  /** Disegna un'immagine in modalita' "cover" (riempie tutto il rettangolo), con rotazione opzionale attorno al proprio centro. */
+  function drawCover(context, img, rectW, rectH, scale, offXFrac, offYFrac, rotationDeg) {
     const imgRatio = img.width / img.height;
     const rectRatio = rectW / rectH;
 
@@ -74,11 +74,15 @@
     const cx = rectW / 2 + offXFrac * maxOffX * 0.5;
     const cy = rectH / 2 + offYFrac * maxOffY * 0.5;
 
-    context.drawImage(img, cx - drawW / 2, cy - drawH / 2, drawW, drawH);
+    context.save();
+    context.translate(cx, cy);
+    context.rotate(((rotationDeg || 0) * Math.PI) / 180);
+    context.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    context.restore();
   }
 
-  /** Disegna il soggetto in modalita' "contain", ancorato in basso (come un ritaglio a figura intera). */
-  function drawSubjectContain(context, img, rectW, rectH, scale, offXFrac, offYFrac) {
+  /** Disegna il soggetto in modalita' "contain", ancorato in basso (come un ritaglio a figura intera), con rotazione opzionale. */
+  function drawSubjectContain(context, img, rectW, rectH, scale, offXFrac, offYFrac, rotationDeg) {
     const imgRatio = img.width / img.height;
     let drawW = rectW * scale;
     let drawH = drawW / imgRatio;
@@ -92,7 +96,11 @@
     const baseY = rectH - drawH * 0.42; // ancoraggio verso il basso, con un margine
     const cy = baseY + offYFrac * rectH * 0.3;
 
-    context.drawImage(img, cx - drawW / 2, cy - drawH / 2, drawW, drawH);
+    context.save();
+    context.translate(cx, cy);
+    context.rotate(((rotationDeg || 0) * Math.PI) / 180);
+    context.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    context.restore();
   }
 
   function formatTimeParts() {
@@ -178,7 +186,7 @@
     context.fillRect(0, 0, w, h);
 
     if (state.bg.img) {
-      drawCover(context, state.bg.img, w, h, state.bg.scale, state.bg.offX, state.bg.offY);
+      drawCover(context, state.bg.img, w, h, state.bg.scale, state.bg.offX, state.bg.offY, state.bg.rotation);
     }
 
     if (state.bgDim > 0) {
@@ -191,7 +199,7 @@
 
     // Livello 2: soggetto ritagliato (sopra l'orologio -> effetto di profondita')
     if (state.fg.img) {
-      drawSubjectContain(context, state.fg.img, w, h, state.fg.scale, state.fg.offX, state.fg.offY);
+      drawSubjectContain(context, state.fg.img, w, h, state.fg.scale, state.fg.offX, state.fg.offY, state.fg.rotation);
     }
   }
 
@@ -515,16 +523,33 @@
   bindRange("bgScaleRange", "bgScaleValue", (v) => { state.bg.scale = v / 100; }, (v) => v + "%");
   bindRange("bgXRange", "bgXValue", (v) => { state.bg.offX = v / 100; }, (v) => v);
   bindRange("bgYRange", "bgYValue", (v) => { state.bg.offY = v / 100; }, (v) => v);
+  bindRange("bgRotationRange", "bgRotationValue", (v) => { state.bg.rotation = v; }, (v) => v + "°");
 
   bindRange("fgScaleRange", "fgScaleValue", (v) => { state.fg.scale = v / 100; }, (v) => v + "%");
   bindRange("fgXRange", "fgXValue", (v) => { state.fg.offX = v / 100; }, (v) => v);
   bindRange("fgYRange", "fgYValue", (v) => { state.fg.offY = v / 100; }, (v) => v);
+  bindRange("fgRotationRange", "fgRotationValue", (v) => { state.fg.rotation = v; }, (v) => v + "°");
+
+  /** Ruota di uno scatto di 90° (utile per raddrizzare foto orizzontali/verticali), mantenendo il valore nel range -180..180 dello slider. */
+  function quickRotate(layerState, rangeId, valueId, deltaDeg) {
+    let next = (layerState.rotation + deltaDeg) % 360;
+    if (next > 180) next -= 360;
+    if (next < -180) next += 360;
+    layerState.rotation = next;
+    document.getElementById(rangeId).value = next;
+    document.getElementById(valueId).textContent = next + "°";
+    renderPreview();
+  }
+  document.getElementById("bgRotateLeftBtn").addEventListener("click", () => quickRotate(state.bg, "bgRotationRange", "bgRotationValue", -90));
+  document.getElementById("bgRotateRightBtn").addEventListener("click", () => quickRotate(state.bg, "bgRotationRange", "bgRotationValue", 90));
+  document.getElementById("fgRotateLeftBtn").addEventListener("click", () => quickRotate(state.fg, "fgRotationRange", "fgRotationValue", -90));
+  document.getElementById("fgRotateRightBtn").addEventListener("click", () => quickRotate(state.fg, "fgRotationRange", "fgRotationValue", 90));
 
   document.getElementById("btnResetFx").addEventListener("click", () => {
-    state.bg.scale = 1; state.bg.offX = 0; state.bg.offY = 0;
-    state.fg.scale = 1; state.fg.offX = 0; state.fg.offY = 0;
+    state.bg.scale = 1; state.bg.offX = 0; state.bg.offY = 0; state.bg.rotation = 0;
+    state.fg.scale = 1; state.fg.offX = 0; state.fg.offY = 0; state.fg.rotation = 0;
     state.bgDim = 0;
-    ["bgScaleRange:100", "bgXRange:0", "bgYRange:0", "fgScaleRange:100", "fgXRange:0", "fgYRange:0", "dimRange:0"]
+    ["bgScaleRange:100", "bgXRange:0", "bgYRange:0", "bgRotationRange:0", "fgScaleRange:100", "fgXRange:0", "fgYRange:0", "fgRotationRange:0", "dimRange:0"]
       .forEach((pair) => {
         const [id, val] = pair.split(":");
         const el = document.getElementById(id);
@@ -626,9 +651,11 @@
       bgScale: state.bg.scale,
       bgOffX: state.bg.offX,
       bgOffY: state.bg.offY,
+      bgRotation: state.bg.rotation,
       fgScale: state.fg.scale,
       fgOffX: state.fg.offX,
       fgOffY: state.fg.offY,
+      fgRotation: state.fg.rotation,
       parallaxEnabled: state.parallaxEnabled,
     });
   }

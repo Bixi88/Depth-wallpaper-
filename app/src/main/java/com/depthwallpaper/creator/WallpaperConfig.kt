@@ -28,9 +28,11 @@ data class WallpaperConfig(
     val bgScale: Float,
     val bgOffX: Float,      // -1..1
     val bgOffY: Float,
+    val bgRotation: Float,  // gradi, -180..180
     val fgScale: Float,
     val fgOffX: Float,      // -1..1
     val fgOffY: Float,
+    val fgRotation: Float,  // gradi, -180..180
     val parallaxEnabled: Boolean
 ) {
     companion object {
@@ -55,9 +57,11 @@ data class WallpaperConfig(
             bgScale = 1f,
             bgOffX = 0f,
             bgOffY = 0f,
+            bgRotation = 0f,
             fgScale = 1f,
             fgOffX = 0f,
             fgOffY = 0f,
+            fgRotation = 0f,
             parallaxEnabled = true
         )
 
@@ -86,9 +90,11 @@ data class WallpaperConfig(
                     bgScale = root.optDouble("bgScale", 1.0).toFloat(),
                     bgOffX = root.optDouble("bgOffX", 0.0).toFloat(),
                     bgOffY = root.optDouble("bgOffY", 0.0).toFloat(),
+                    bgRotation = root.optDouble("bgRotation", 0.0).toFloat(),
                     fgScale = root.optDouble("fgScale", 1.0).toFloat(),
                     fgOffX = root.optDouble("fgOffX", 0.0).toFloat(),
                     fgOffY = root.optDouble("fgOffY", 0.0).toFloat(),
+                    fgRotation = root.optDouble("fgRotation", 0.0).toFloat(),
                     parallaxEnabled = root.optBoolean("parallaxEnabled", true)
                 )
             } catch (e: Exception) {
