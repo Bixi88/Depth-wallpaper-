@@ -1,5 +1,6 @@
 package com.depthwallpaper.creator
 
+import android.graphics.BlurMaskFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -14,18 +15,12 @@ import java.util.Locale
 /**
  * Porting nativo 1:1 del render() dell'editor (assets/js/app.js).
  *
- * Ordine dei livelli:
- *   0) sfondo          (foto intera, "cover")
- *   0b) velo scuro     (opzionale)
- *   1) orologio        (livello di testo indipendente)
- *   1b) data           (livello di testo indipendente)
- *   2) soggetto        (PNG a piena inquadratura con sfondo trasparente) -> copre l'orologio
+ * Livelli: sfondo -> velo scuro -> orologio -> data -> soggetto ritagliato.
  *
- * IMPORTANTE: il soggetto viene disegnato con ESATTAMENTE la stessa geometria dello
- * sfondo (stessa scala "cover", stesso centro, stessa rotazione). Poiche' il PNG del
- * ritaglio conserva l'inquadratura completa della foto originale, il soggetto ricade
- * pixel-per-pixel dove si trovava nella foto, senza doverlo riposizionare a mano.
- * fgScale/fgOffX/fgOffY sono scostamenti FACOLTATIVI rispetto a quella posizione.
+ * Il PNG del soggetto conserva l'inquadratura completa della foto originale: disegnato
+ * con la geometria "cover" neutra (scala 1, nessuno scostamento) ricade esattamente
+ * dove si trovava nella foto. Le trasformazioni dello SFONDO non lo toccano, a meno
+ * che l'utente non attivi linkFgToBg.
  */
 object DepthRenderer {
 
@@ -45,7 +40,6 @@ object DepthRenderer {
 
         canvas.drawColor(Color.BLACK)
 
-        // ---- Livello 0: sfondo ----
         if (bg != null) {
             drawCover(canvas, bg, w, h, config.bgScale, config.bgOffX, config.bgOffY, config.bgRotation)
         }
@@ -56,31 +50,32 @@ object DepthRenderer {
             canvas.drawRect(0f, 0f, w, h, paint)
         }
 
-        // ---- Livello 1: orologio ----
         if (config.clock.enabled) {
-            val text = clockText(config.clock)
-            drawTextLayer(canvas, w, h, k, config.clock.style, text, multiline = config.clock.mode == "custom")
+            drawTextLayer(
+                canvas, w, h, k, config.clock.style,
+                clockText(config.clock),
+                multiline = config.clock.mode == "custom"
+            )
         }
 
-        // ---- Livello 1b: data ----
         if (config.date.enabled) {
             drawTextLayer(canvas, w, h, k, config.date.style, dateText(config.date), multiline = false)
         }
 
-        // ---- Livello 2: soggetto ritagliato, sopra l'orologio ----
         if (fg != null) {
+            val link = config.linkFgToBg
             drawCover(
                 canvas, fg, w, h,
-                config.bgScale * config.fgScale,
-                config.bgOffX + config.fgOffX,
-                config.bgOffY + config.fgOffY,
-                config.bgRotation
+                if (link) config.bgScale * config.fgScale else config.fgScale,
+                if (link) config.bgOffX + config.fgOffX else config.fgOffX,
+                if (link) config.bgOffY + config.fgOffY else config.fgOffY,
+                if (link) config.bgRotation else 0f
             )
         }
     }
 
     // -------------------------------------------------------------------------------
-    // Immagini: geometria "cover" condivisa da sfondo e soggetto
+    // Immagini
     // -------------------------------------------------------------------------------
     private fun drawCover(
         canvas: Canvas,
@@ -111,11 +106,10 @@ object DepthRenderer {
     }
 
     // -------------------------------------------------------------------------------
-    // Testo (orologio / data)
+    // Testo
     // -------------------------------------------------------------------------------
     private fun typefaceFor(fontKey: String, bold: Boolean, italic: Boolean): Typeface {
         val family = when (fontKey) {
-            "sans" -> "sans-serif"
             "sansLight" -> "sans-serif-light"
             "sansMedium" -> "sans-serif-medium"
             "sansBlack" -> "sans-serif-black"
@@ -137,6 +131,9 @@ object DepthRenderer {
         return Typeface.create(family, style)
     }
 
+    private fun parseColor(value: String, fallback: Int): Int =
+        try { Color.parseColor(value) } catch (e: Exception) { fallback }
+
     private fun drawTextLayer(
         canvas: Canvas,
         w: Float,
@@ -150,37 +147,119 @@ object DepthRenderer {
         val sizePx = style.size * k
         if (sizePx <= 0f) return
 
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
-        paint.typeface = typefaceFor(style.fontKey, style.bold, style.italic)
-        paint.textSize = sizePx
-        paint.color = try { Color.parseColor(style.color) } catch (e: Exception) { Color.WHITE }
-        paint.alpha = (style.opacity.coerceIn(0f, 1f) * 255).toInt()
-        if (style.shadow) {
-            paint.setShadowLayer(sizePx * 0.10f, 0f, sizePx * 0.03f, Color.argb(110, 0, 0, 0))
-        }
-
         val tracking = style.tracking * k
         val sx = if (style.stretchX <= 0f) 1f else style.stretchX
         val sy = if (style.stretchY <= 0f) 1f else style.stretchY
+        val alpha = style.opacity.coerceIn(0f, 1f)
+
+        val base = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
+        base.typeface = typefaceFor(style.fontKey, style.bold, style.italic)
+        base.textSize = sizePx
+
+        val lines: List<String> = if (multiline) {
+            wrapLines(base, text, (w * 0.92f) / sx, tracking)
+        } else {
+            listOf(text)
+        }
+        val lineHeight = sizePx * 1.12f
+        val firstY = -(lines.size - 1) * lineHeight / 2f
 
         canvas.save()
         canvas.translate(style.x * w, style.y * h)
         canvas.scale(sx, sy)
 
-        if (multiline) {
-            val maxWidth = (w * 0.92f) / sx
-            val lines = wrapLines(paint, text, maxWidth, tracking)
-            val lineHeight = sizePx * 1.12f
-            var lineY = -(lines.size - 1) * lineHeight / 2f
-            for (line in lines) {
-                drawTracked(canvas, paint, line, lineY, tracking)
-                lineY += lineHeight
+        var shadowPending = style.shadowOpacity > 0f
+
+        // --- pannello dietro al testo ---
+        if (style.plateOpacity > 0f) {
+            var maxW = 0f
+            for (line in lines) maxW = maxOf(maxW, measureTracked(base, line, tracking))
+            val padX = sizePx * 0.32f
+            val padY = sizePx * 0.22f
+            val rect = RectF(
+                -maxW / 2f - padX,
+                firstY - lineHeight / 2f - padY,
+                maxW / 2f + padX,
+                firstY + (lines.size - 1) * lineHeight + lineHeight / 2f + padY
+            )
+            val platePaint = Paint(Paint.ANTI_ALIAS_FLAG)
+            platePaint.color = parseColor(style.plateColor, Color.BLACK)
+            platePaint.alpha = (style.plateOpacity.coerceIn(0f, 1f) * alpha * 255).toInt()
+            if (shadowPending) {
+                platePaint.setShadowLayer(
+                    style.shadowBlur * k, 0f, style.shadowOffsetY * k,
+                    Color.argb((style.shadowOpacity.coerceIn(0f, 1f) * 255).toInt(), 0, 0, 0)
+                )
+                shadowPending = false
             }
-        } else {
-            drawTracked(canvas, paint, text, 0f, tracking)
+            canvas.drawRoundRect(rect, sizePx * 0.28f, sizePx * 0.28f, platePaint)
         }
 
+        // --- alone morbido ---
+        if (style.glowWidth > 0f) {
+            val glow = Paint(base)
+            glow.style = Paint.Style.STROKE
+            glow.strokeJoin = Paint.Join.ROUND
+            glow.strokeCap = Paint.Cap.ROUND
+            glow.strokeWidth = style.glowWidth * k * 2f
+            glow.color = parseColor(style.glowColor, Color.BLACK)
+            glow.alpha = (alpha * 255).toInt()
+            try {
+                glow.maskFilter = BlurMaskFilter(maxOf(1f, style.glowWidth * k), BlurMaskFilter.Blur.NORMAL)
+            } catch (e: Throwable) {
+                // dispositivi senza supporto: resta un contorno netto
+            }
+            drawLines(canvas, glow, lines, firstY, lineHeight, tracking)
+        }
+
+        // --- contorno netto ---
+        if (style.outlineWidth > 0f) {
+            val outline = Paint(base)
+            outline.style = Paint.Style.STROKE
+            outline.strokeJoin = Paint.Join.ROUND
+            outline.strokeCap = Paint.Cap.ROUND
+            outline.strokeWidth = style.outlineWidth * k * 2f
+            outline.color = parseColor(style.outlineColor, Color.BLACK)
+            outline.alpha = (alpha * 255).toInt()
+            if (shadowPending) {
+                outline.setShadowLayer(
+                    style.shadowBlur * k, 0f, style.shadowOffsetY * k,
+                    Color.argb((style.shadowOpacity.coerceIn(0f, 1f) * 255).toInt(), 0, 0, 0)
+                )
+                shadowPending = false
+            }
+            drawLines(canvas, outline, lines, firstY, lineHeight, tracking)
+        }
+
+        // --- riempimento ---
+        val fill = Paint(base)
+        fill.style = Paint.Style.FILL
+        fill.color = parseColor(style.color, Color.WHITE)
+        fill.alpha = (alpha * 255).toInt()
+        if (shadowPending) {
+            fill.setShadowLayer(
+                style.shadowBlur * k, 0f, style.shadowOffsetY * k,
+                Color.argb((style.shadowOpacity.coerceIn(0f, 1f) * 255).toInt(), 0, 0, 0)
+            )
+        }
+        drawLines(canvas, fill, lines, firstY, lineHeight, tracking)
+
         canvas.restore()
+    }
+
+    private fun drawLines(
+        canvas: Canvas,
+        paint: Paint,
+        lines: List<String>,
+        firstY: Float,
+        lineHeight: Float,
+        tracking: Float
+    ) {
+        var y = firstY
+        for (line in lines) {
+            drawTracked(canvas, paint, line, y, tracking)
+            y += lineHeight
+        }
     }
 
     /** Disegna il testo centrato in (0, y), con spaziatura personalizzata tra le lettere. */
@@ -195,8 +274,7 @@ object DepthRenderer {
         }
 
         paint.textAlign = Paint.Align.LEFT
-        val total = measureTracked(paint, text, tracking)
-        var x = -total / 2f
+        var x = -measureTracked(paint, text, tracking) / 2f
         for (ch in text) {
             val s = ch.toString()
             canvas.drawText(s, x, baselineY, paint)
@@ -206,6 +284,7 @@ object DepthRenderer {
 
     private fun measureTracked(paint: Paint, text: String, tracking: Float): Float {
         if (text.isEmpty()) return 0f
+        if (tracking == 0f) return paint.measureText(text)
         var total = 0f
         for (ch in text) total += paint.measureText(ch.toString())
         return total + tracking * (text.length - 1)
@@ -234,9 +313,7 @@ object DepthRenderer {
     // Contenuti dinamici
     // -------------------------------------------------------------------------------
     private fun clockText(clock: ClockConfig): String {
-        if (clock.mode == "custom") {
-            return clock.customText.ifBlank { "Il tuo testo" }
-        }
+        if (clock.mode == "custom") return clock.customText.ifBlank { "Il tuo testo" }
         val pattern = when (clock.format) {
             "24short" -> "H:mm"
             "12" -> "h:mm"

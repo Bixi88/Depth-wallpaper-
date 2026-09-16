@@ -527,3 +527,55 @@ input[type="color"]::-webkit-color-swatch { border-radius: 7px; border: none; }
     flex: 1;
   }
 }
+
+/* ---------------- SLIDER PERSONALIZZATI ---------------- */
+/* Il valore cambia solo con un movimento orizzontale deliberato: cosi' lo
+   scorrimento verticale del pannello non modifica piu' i parametri per sbaglio. */
+.slider-row {
+  position: relative;
+  padding: 6px 0;
+  touch-action: pan-y;
+}
+
+.slider-row input[type="range"] {
+  pointer-events: none;
+  position: relative;
+  z-index: 1;
+  display: block;
+}
+
+.slider-row.dragging input[type="range"]::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+
+/* Pallino di riferimento: tocco = torna al valore centrale, trascinando ci si aggancia. */
+.slider-center {
+  position: absolute;
+  top: 50%;
+  width: 26px;
+  height: 26px;
+  margin-left: -13px;
+  margin-top: -13px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.slider-center::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.30);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+.slider-center:active::after {
+  background: var(--accent);
+  transform: scale(1.4);
+}

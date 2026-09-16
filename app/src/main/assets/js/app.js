@@ -7,9 +7,6 @@
   const CANVAS_W = 1080;
   const CANVAS_H = 1920;
 
-  // Font disponibili. Le chiavi sono le stesse usate lato Kotlin
-  // (DepthRenderer.typefaceFor): l'anteprima e lo sfondo animato usano quindi
-  // lo stesso carattere di sistema Android.
   const FONTS = [
     { key: "sans", label: "Sans (Roboto)", css: "sans-serif" },
     { key: "sansLight", label: "Sans Light", css: "sans-serif-light, sans-serif" },
@@ -42,28 +39,26 @@
       stretchX: 1,
       stretchY: 1,
       tracking: 0,
-      shadow: true,
+      outlineWidth: 0,
+      outlineColor: "#000000",
+      glowWidth: 0,
+      glowColor: "#000000",
+      shadowOpacity: 0.45,
+      shadowBlur: 10,
+      shadowOffsetY: 4,
+      plateOpacity: 0,
+      plateColor: "#000000",
     };
   }
 
   const state = {
     bg: { img: null, dataUrl: null, scale: 1, offX: 0, offY: 0, rotation: 0 },
     fg: { img: null, dataUrl: null, scale: 1, offX: 0, offY: 0 },
-    photoDataUrl: null, // foto sorgente per il ritaglio del soggetto
+    photoDataUrl: null,
     bgDim: 0,
-    clock: {
-      enabled: true,
-      mode: "time", // "time" | "custom"
-      customText: "",
-      format: "24",
-      style: defaultStyle(150, 0.30, true),
-    },
-    date: {
-      enabled: true,
-      format: "full",
-      uppercase: false,
-      style: defaultStyle(38, 0.38, false),
-    },
+    linkFgToBg: false,
+    clock: { enabled: true, mode: "time", customText: "", format: "24", style: defaultStyle(150, 0.30, true) },
+    date: { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.38, false) },
   };
 
   const isNative = typeof Android !== "undefined" && Android !== null;
@@ -73,25 +68,17 @@
   const emptyState = document.getElementById("emptyState");
   const dragHint = document.getElementById("dragHint");
 
-  // Riquadri occupati dall'ultimo disegno: servono per il trascinamento sull'anteprima.
   const hitBoxes = { clock: null, date: null };
 
   // ===========================================================================
-  // RENDERING IMMAGINI
+  // IMMAGINI
   // ===========================================================================
-
-  /**
-   * Geometria "cover" condivisa da sfondo e soggetto. Poiche' il PNG del ritaglio
-   * conserva l'inquadratura completa della foto, usare la stessa geometria significa
-   * che il soggetto ricade esattamente dove si trovava nella foto originale.
-   */
   function drawCover(context, img, rectW, rectH, scale, offXFrac, offYFrac, rotationDeg) {
     if (!img || !img.width || !img.height) return;
     const base = Math.max(rectW / img.width, rectH / img.height);
     const s = base * (scale > 0 ? scale : 1);
     const drawW = img.width * s;
     const drawH = img.height * s;
-
     const cx = rectW / 2 + offXFrac * rectW * 0.5;
     const cy = rectH / 2 + offYFrac * rectH * 0.5;
 
@@ -103,7 +90,7 @@
   }
 
   // ===========================================================================
-  // RENDERING TESTO (orologio e data: stessa funzione, stati separati)
+  // TESTO
   // ===========================================================================
   function pad2(n) { return String(n).padStart(2, "0"); }
 
@@ -128,23 +115,12 @@
     const now = new Date();
     let s;
     switch (state.date.format) {
-      case "fullYear":
-        s = now.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
-        break;
-      case "dayMonth":
-        s = now.toLocaleDateString("it-IT", { day: "numeric", month: "long" });
-        break;
-      case "short":
-        s = now.toLocaleDateString("it-IT", { weekday: "short", day: "numeric", month: "short" });
-        break;
-      case "numeric":
-        s = now.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit", year: "numeric" });
-        break;
-      case "weekday":
-        s = now.toLocaleDateString("it-IT", { weekday: "long" });
-        break;
-      default:
-        s = now.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" });
+      case "fullYear": s = now.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long", year: "numeric" }); break;
+      case "dayMonth": s = now.toLocaleDateString("it-IT", { day: "numeric", month: "long" }); break;
+      case "short": s = now.toLocaleDateString("it-IT", { weekday: "short", day: "numeric", month: "short" }); break;
+      case "numeric": s = now.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit", year: "numeric" }); break;
+      case "weekday": s = now.toLocaleDateString("it-IT", { weekday: "long" }); break;
+      default: s = now.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" });
     }
     if (state.date.uppercase) return s.toUpperCase();
     return s.charAt(0).toUpperCase() + s.slice(1);
@@ -158,17 +134,26 @@
     return total + tracking * (text.length - 1);
   }
 
-  function drawTracked(context, text, y, tracking) {
+  function drawTrackedLine(context, text, y, tracking, mode) {
+    const paint = mode === "stroke" ? context.strokeText.bind(context) : context.fillText.bind(context);
     if (!tracking) {
       context.textAlign = "center";
-      context.fillText(text, 0, y);
+      paint(text, 0, y);
       return;
     }
     context.textAlign = "left";
     let x = -measureTracked(context, text, tracking) / 2;
     for (const ch of text) {
-      context.fillText(ch, x, y);
+      paint(ch, x, y);
       x += context.measureText(ch).width + tracking;
+    }
+  }
+
+  function drawLines(context, lines, firstY, lineHeight, tracking, mode) {
+    let y = firstY;
+    for (const line of lines) {
+      drawTrackedLine(context, line, y, tracking, mode);
+      y += lineHeight;
     }
   }
 
@@ -191,7 +176,36 @@
     return out;
   }
 
-  /** Disegna un livello di testo e restituisce il suo riquadro (in frazioni 0..1). */
+  function clearShadow(context) {
+    context.shadowColor = "rgba(0,0,0,0)";
+    context.shadowBlur = 0;
+    context.shadowOffsetX = 0;
+    context.shadowOffsetY = 0;
+  }
+
+  function roundRectPath(context, x, y, w, h, r) {
+    if (context.roundRect) {
+      context.beginPath();
+      context.roundRect(x, y, w, h, r);
+      return;
+    }
+    const rr = Math.min(r, w / 2, h / 2);
+    context.beginPath();
+    context.moveTo(x + rr, y);
+    context.arcTo(x + w, y, x + w, y + h, rr);
+    context.arcTo(x + w, y + h, x, y + h, rr);
+    context.arcTo(x, y + h, x, y, rr);
+    context.arcTo(x, y, x + w, y, rr);
+    context.closePath();
+  }
+
+  function hexToRgba(hex, alpha) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || "#000000");
+    if (!m) return `rgba(0,0,0,${alpha})`;
+    return `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${alpha})`;
+  }
+
+  /** Disegna un livello di testo e restituisce il riquadro occupato (frazioni 0..1). */
   function drawTextLayer(context, w, h, style, text, multiline) {
     if (!text) return null;
     const k = w / CANVAS_W;
@@ -201,16 +215,13 @@
     const sx = style.stretchX > 0 ? style.stretchX : 1;
     const sy = style.stretchY > 0 ? style.stretchY : 1;
     const tracking = style.tracking * k;
+    const alpha = Math.max(0, Math.min(1, style.opacity));
 
     context.save();
-    context.globalAlpha = Math.max(0, Math.min(1, style.opacity));
-    context.fillStyle = style.color;
+    context.globalAlpha = alpha;
     context.textBaseline = "middle";
-    if (style.shadow) {
-      context.shadowColor = "rgba(0,0,0,0.45)";
-      context.shadowBlur = size * 0.10;
-      context.shadowOffsetY = size * 0.03;
-    }
+    context.lineJoin = "round";
+    context.lineCap = "round";
     const weight = style.bold ? "700" : "400";
     const italic = style.italic ? "italic " : "";
     context.font = `${italic}${weight} ${size}px ${fontCss(style.fontKey)}`;
@@ -218,44 +229,83 @@
     context.translate(style.x * w, style.y * h);
     context.scale(sx, sy);
 
-    let boxW = 0;
-    let boxH = size * 1.2;
+    const lines = multiline ? wrapLines(context, text, (w * 0.92) / sx, tracking) : [String(text)];
+    const lineHeight = size * 1.12;
+    const firstY = (-(lines.length - 1) * lineHeight) / 2;
 
-    if (multiline) {
-      const maxWidth = (w * 0.92) / sx;
-      const lines = wrapLines(context, text, maxWidth, tracking);
-      const lineHeight = size * 1.12;
-      let lineY = (-(lines.length - 1) * lineHeight) / 2;
-      for (const line of lines) {
-        drawTracked(context, line, lineY, tracking);
-        boxW = Math.max(boxW, measureTracked(context, line, tracking));
-        lineY += lineHeight;
-      }
-      boxH = lines.length * lineHeight;
-    } else {
-      drawTracked(context, text, 0, tracking);
-      boxW = measureTracked(context, text, tracking);
+    let maxW = 0;
+    for (const line of lines) maxW = Math.max(maxW, measureTracked(context, line, tracking));
+
+    let shadowPending = style.shadowOpacity > 0;
+    function applyShadowIfPending() {
+      if (!shadowPending) { clearShadow(context); return; }
+      context.shadowColor = `rgba(0,0,0,${style.shadowOpacity})`;
+      context.shadowBlur = style.shadowBlur * k;
+      context.shadowOffsetX = 0;
+      context.shadowOffsetY = style.shadowOffsetY * k;
+      shadowPending = false;
     }
+
+    // --- pannello dietro ---
+    if (style.plateOpacity > 0) {
+      applyShadowIfPending();
+      const padX = size * 0.32;
+      const padY = size * 0.22;
+      const rectX = -maxW / 2 - padX;
+      const rectY = firstY - lineHeight / 2 - padY;
+      const rectW = maxW + padX * 2;
+      const rectH = (lines.length - 1) * lineHeight + lineHeight + padY * 2;
+      context.fillStyle = hexToRgba(style.plateColor, style.plateOpacity);
+      roundRectPath(context, rectX, rectY, rectW, rectH, size * 0.28);
+      context.fill();
+      clearShadow(context);
+    }
+
+    // --- alone morbido ---
+    if (style.glowWidth > 0) {
+      const gw = style.glowWidth * k;
+      context.strokeStyle = style.glowColor;
+      context.lineWidth = gw * 2;
+      context.shadowColor = style.glowColor;
+      context.shadowBlur = gw * 1.6;
+      context.shadowOffsetX = 0;
+      context.shadowOffsetY = 0;
+      drawLines(context, lines, firstY, lineHeight, tracking, "stroke");
+      clearShadow(context);
+    }
+
+    // --- contorno netto ---
+    if (style.outlineWidth > 0) {
+      applyShadowIfPending();
+      context.strokeStyle = style.outlineColor;
+      context.lineWidth = style.outlineWidth * k * 2;
+      drawLines(context, lines, firstY, lineHeight, tracking, "stroke");
+      clearShadow(context);
+    }
+
+    // --- riempimento ---
+    applyShadowIfPending();
+    context.fillStyle = style.color;
+    drawLines(context, lines, firstY, lineHeight, tracking, "fill");
 
     context.restore();
 
     return {
       x: style.x,
       y: style.y,
-      halfW: (boxW * sx) / 2 / w,
-      halfH: (boxH * sy) / 2 / h,
+      halfW: (maxW * sx) / 2 / w,
+      halfH: ((lines.length * lineHeight) * sy) / 2 / h,
     };
   }
 
   // ===========================================================================
-  // RENDER COMPLETO
+  // RENDER
   // ===========================================================================
   function render(context, w, h) {
     context.clearRect(0, 0, w, h);
     context.fillStyle = "#000000";
     context.fillRect(0, 0, w, h);
 
-    // Livello 0: sfondo
     if (state.bg.img) {
       drawCover(context, state.bg.img, w, h, state.bg.scale, state.bg.offX, state.bg.offY, state.bg.rotation);
     }
@@ -265,27 +315,22 @@
       context.fillRect(0, 0, w, h);
     }
 
-    // Livello 1: orologio
     const clockBox = state.clock.enabled
       ? drawTextLayer(context, w, h, state.clock.style, clockString(), state.clock.mode === "custom")
       : null;
 
-    // Livello 1b: data
     const dateBox = state.date.enabled
       ? drawTextLayer(context, w, h, state.date.style, dateString(), false)
       : null;
 
-    // Livello 2: soggetto, esattamente dov'era nella foto (piu' eventuali scostamenti)
     if (state.fg.img) {
+      const link = state.linkFgToBg;
       drawCover(
-        context,
-        state.fg.img,
-        w,
-        h,
-        state.bg.scale * state.fg.scale,
-        state.bg.offX + state.fg.offX,
-        state.bg.offY + state.fg.offY,
-        state.bg.rotation
+        context, state.fg.img, w, h,
+        link ? state.bg.scale * state.fg.scale : state.fg.scale,
+        link ? state.bg.offX + state.fg.offX : state.fg.offX,
+        link ? state.bg.offY + state.fg.offY : state.fg.offY,
+        link ? state.bg.rotation : 0
       );
     }
 
@@ -329,34 +374,132 @@
   });
 
   // ===========================================================================
-  // HELPER CONTROLLI
+  // SLIDER PERSONALIZZATI
+  // ---------------------------------------------------------------------------
+  // Gli slider nativi cambiano valore al primo tocco: scorrendo la lista in
+  // verticale capitava di modificare per sbaglio i parametri. Qui il valore si
+  // muove SOLO dopo un movimento chiaramente orizzontale (oltre 6px e piu'
+  // orizzontale che verticale) e in modo relativo, quindi un tocco non sposta
+  // nulla e lo scorrimento verticale resta libero. Ogni slider ha un pallino sul
+  // valore di riferimento: toccandolo si torna li', trascinando ci si "aggancia".
   // ===========================================================================
-  function bindRange(rangeId, badgeId, setter, formatter) {
-    const range = document.getElementById(rangeId);
-    const badge = document.getElementById(badgeId);
-    range.addEventListener("input", () => {
-      const v = Number(range.value);
-      setter(v);
-      if (badge) badge.textContent = formatter ? formatter(v) : v;
-      renderPreview();
-    });
+  const sliders = {};
+  const MAGNET = 0.025; // 2,5% della corsa
+
+  function applySlider(s, rawValue, doRender) {
+    const v = Math.round(Math.max(s.min, Math.min(s.max, rawValue)));
+    s.input.value = v;
+    if (s.setter) s.setter(v);
+    if (s.badge) s.badge.textContent = s.formatter ? s.formatter(v) : String(v);
+    if (doRender) renderPreview();
   }
 
-  function setRange(rangeId, badgeId, value, formatter) {
-    const range = document.getElementById(rangeId);
-    if (range) range.value = value;
-    const badge = document.getElementById(badgeId);
-    if (badge) badge.textContent = formatter ? formatter(value) : value;
+  function setSlider(rangeId, value) {
+    const s = sliders[rangeId];
+    if (s) applySlider(s, value, false);
+  }
+
+  function buildSliderRow(s) {
+    const input = s.input;
+    const row = document.createElement("div");
+    row.className = "slider-row";
+    input.parentNode.insertBefore(row, input);
+    row.appendChild(input);
+
+    const dot = document.createElement("button");
+    dot.className = "slider-center";
+    dot.type = "button";
+    dot.title = "Torna al valore centrale";
+    const p = (s.center - s.min) / (s.max - s.min);
+    dot.style.left = `calc(10px + ${p} * (100% - 20px))`;
+    dot.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      applySlider(s, s.center, true);
+    });
+    row.appendChild(dot);
+
+    let drag = null;
+
+    function pointOf(evt) {
+      const p = evt.touches ? evt.touches[0] : evt;
+      return { x: p.clientX, y: p.clientY };
+    }
+
+    function onDown(evt) {
+      if (evt.target === dot) return;
+      const p = pointOf(evt);
+      drag = { x: p.x, y: p.y, startVal: Number(input.value), active: false };
+    }
+
+    function onMove(evt) {
+      if (!drag) return;
+      const p = pointOf(evt);
+      const dx = p.x - drag.x;
+      const dy = p.y - drag.y;
+
+      if (!drag.active) {
+        if (Math.abs(dy) > Math.abs(dx)) { drag = null; return; } // scorrimento verticale
+        if (Math.abs(dx) < 6) return;
+        drag.active = true;
+        row.classList.add("dragging");
+      }
+      if (evt.cancelable) evt.preventDefault();
+
+      const width = Math.max(1, input.getBoundingClientRect().width - 20);
+      const span = s.max - s.min;
+      let v = drag.startVal + (dx / width) * span;
+      if (Math.abs(v - s.center) <= span * MAGNET) v = s.center;
+      applySlider(s, v, true);
+    }
+
+    function onUp() {
+      if (drag) row.classList.remove("dragging");
+      drag = null;
+    }
+
+    row.addEventListener("touchstart", onDown, { passive: true });
+    row.addEventListener("touchmove", onMove, { passive: false });
+    row.addEventListener("touchend", onUp);
+    row.addEventListener("touchcancel", onUp);
+    row.addEventListener("mousedown", onDown);
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function bindRange(rangeId, badgeId, setter, formatter) {
+    const input = document.getElementById(rangeId);
+    if (!input) return;
+    const s = {
+      input: input,
+      badge: badgeId ? document.getElementById(badgeId) : null,
+      setter: setter,
+      formatter: formatter,
+      min: Number(input.min),
+      max: Number(input.max),
+      center: input.dataset.center !== undefined ? Number(input.dataset.center) : Number(input.value),
+    };
+    sliders[rangeId] = s;
+    buildSliderRow(s);
+    applySlider(s, Number(input.value), false);
   }
 
   function bindCheck(id, setter) {
     const el = document.getElementById(id);
+    if (!el) return;
     el.addEventListener("change", () => { setter(el.checked); renderPreview(); });
   }
 
   function bindSelect(id, setter) {
     const el = document.getElementById(id);
+    if (!el) return;
     el.addEventListener("change", () => { setter(el.value); renderPreview(); });
+  }
+
+  function bindColor(id, setter) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener("input", () => { setter(el.value); renderPreview(); });
   }
 
   function fillFontSelect(id, selectedKey) {
@@ -372,8 +515,10 @@
     });
   }
 
-  fillFontSelect("clockFontSelect", state.clock.style.fontKey);
-  fillFontSelect("dateFontSelect", state.date.style.fontKey);
+  // Zoom: valore slider -100..100 -> fattore 0,5x .. 2x, con 100% esattamente al centro.
+  function sliderToScale(v) { return Math.pow(2, v / 100); }
+  function scaleToSlider(s) { return Math.round((Math.log(s) / Math.LN2) * 100); }
+  function scaleFormatter(v) { return Math.round(sliderToScale(v) * 100) + "%"; }
 
   // ===========================================================================
   // MEDIA
@@ -403,29 +548,37 @@
   document.getElementById("btnCutoutOther").addEventListener("click", () => requestImage("fg-source"));
 
   document.getElementById("btnCutout").addEventListener("click", () => {
-    if (state.photoDataUrl) {
-      openCutoutEditor(state.photoDataUrl);
-    } else {
-      requestImage("fg-source");
-    }
+    if (state.photoDataUrl) openCutoutEditor(state.photoDataUrl);
+    else requestImage("fg-source");
   });
 
-  document.getElementById("btnRemoveFg").addEventListener("click", () => {
+  function clearSubject() {
     state.fg.img = null;
     state.fg.dataUrl = null;
+    state.fg.scale = 1;
+    state.fg.offX = 0;
+    state.fg.offY = 0;
+    setSlider("fgScaleRange", 0);
+    setSlider("fgXRange", 0);
+    setSlider("fgYRange", 0);
     const thumb = document.getElementById("thumbFg");
     thumb.style.backgroundImage = "";
     thumb.innerHTML = "<span>vuoto</span>";
+  }
+
+  document.getElementById("btnRemoveFg").addEventListener("click", () => {
+    clearSubject();
     renderPreview();
     showToast("Soggetto rimosso");
   });
 
-  function setBackground(dataUrl, alsoAsSource) {
+  function setBackground(dataUrl, alsoAsSource, resetSubject) {
     const img = new Image();
     img.onload = () => {
       state.bg.img = img;
       state.bg.dataUrl = dataUrl;
       if (alsoAsSource) state.photoDataUrl = dataUrl;
+      if (resetSubject) clearSubject();
       const thumb = document.getElementById("thumbBg");
       thumb.style.backgroundImage = `url(${dataUrl})`;
       thumb.innerHTML = "";
@@ -435,7 +588,6 @@
     img.src = dataUrl;
   }
 
-  /** Chiamata dal lato nativo (Kotlin) quando un'immagine e' stata selezionata. */
   window.onImageLoaded = function (layer, dataUrl, errorMessage) {
     if (!dataUrl) {
       showToast(errorMessage || "Nessuna immagine selezionata");
@@ -443,15 +595,17 @@
     }
     if (layer === "fg-source") {
       state.photoDataUrl = dataUrl;
-      if (!state.bg.img) setBackground(dataUrl, false);
+      clearSubject();
+      if (!state.bg.img) setBackground(dataUrl, false, false);
       openCutoutEditor(dataUrl);
       return;
     }
-    setBackground(dataUrl, true);
+    // Foto nuova come sfondo: il soggetto della foto precedente non ha piu' senso.
+    setBackground(dataUrl, true, true);
   };
 
   // ===========================================================================
-  // RITAGLIO SOGGETTO (ML Kit on-device + pennello)
+  // RITAGLIO SOGGETTO
   // ===========================================================================
   const cutoutModal = document.getElementById("cutoutModal");
   const cutoutCanvas = document.getElementById("cutoutCanvas");
@@ -581,10 +735,7 @@
     });
   });
 
-  document.getElementById("cutoutBrushRange").addEventListener("input", (e) => {
-    cutoutBrushSize = Number(e.target.value);
-    document.getElementById("cutoutBrushValue").textContent = cutoutBrushSize;
-  });
+  bindRange("cutoutBrushRange", "cutoutBrushValue", (v) => { cutoutBrushSize = v; });
 
   document.getElementById("cutoutResetBtn").addEventListener("click", requestAiCutout);
 
@@ -598,11 +749,6 @@
     cutoutModal.classList.add("hidden");
   });
 
-  /**
-   * Applica il ritaglio. Il PNG conserva l'INTERA inquadratura della foto (lo sfondo
-   * e' semplicemente trasparente): cosi' il soggetto viene ridisegnato con la stessa
-   * geometria dello sfondo e resta esattamente al suo posto, senza riposizionamenti.
-   */
   document.getElementById("cutoutApplyBtn").addEventListener("click", () => {
     if (!cutoutSourceCanvas) {
       cutoutModal.classList.add("hidden");
@@ -616,9 +762,9 @@
       state.fg.scale = 1;
       state.fg.offX = 0;
       state.fg.offY = 0;
-      setRange("fgScaleRange", "fgScaleValue", 100, (v) => v + "%");
-      setRange("fgXRange", "fgXValue", 0);
-      setRange("fgYRange", "fgYValue", 0);
+      setSlider("fgScaleRange", 0);
+      setSlider("fgXRange", 0);
+      setSlider("fgYRange", 0);
       const thumb = document.getElementById("thumbFg");
       thumb.style.backgroundImage = `url(${dataUrl})`;
       thumb.innerHTML = "";
@@ -630,8 +776,67 @@
   });
 
   // ===========================================================================
-  // TAB OROLOGIO
+  // CONTROLLI DEI LIVELLI DI TESTO (orologio e data: stessi controlli, stati separati)
   // ===========================================================================
+  function bindTextLayer(prefix, getLayer) {
+    const st = () => getLayer().style;
+
+    bindSelect(prefix + "FontSelect", (v) => { st().fontKey = v; });
+    bindCheck(prefix + "BoldCheck", (v) => { st().bold = v; });
+    bindCheck(prefix + "ItalicCheck", (v) => { st().italic = v; });
+    bindRange(prefix + "SizeRange", prefix + "SizeValue", (v) => { st().size = v; });
+    bindRange(prefix + "TrackRange", prefix + "TrackValue", (v) => { st().tracking = v; });
+
+    bindColor(prefix + "ColorPicker", (v) => { st().color = v; });
+    bindRange(prefix + "OpacityRange", prefix + "OpacityValue", (v) => { st().opacity = v / 100; }, (v) => v + "%");
+
+    bindRange(prefix + "OutlineRange", prefix + "OutlineValue", (v) => { st().outlineWidth = v; });
+    bindColor(prefix + "OutlineColor", (v) => { st().outlineColor = v; });
+    bindRange(prefix + "GlowRange", prefix + "GlowValue", (v) => { st().glowWidth = v; });
+    bindColor(prefix + "GlowColor", (v) => { st().glowColor = v; });
+    bindRange(prefix + "ShadowRange", prefix + "ShadowValue", (v) => { st().shadowOpacity = v / 100; }, (v) => v + "%");
+    bindRange(prefix + "ShadowBlurRange", prefix + "ShadowBlurValue", (v) => { st().shadowBlur = v; });
+    bindRange(prefix + "ShadowOffRange", prefix + "ShadowOffValue", (v) => { st().shadowOffsetY = v; });
+    bindRange(prefix + "PlateRange", prefix + "PlateValue", (v) => { st().plateOpacity = v / 100; }, (v) => v + "%");
+    bindColor(prefix + "PlateColor", (v) => { st().plateColor = v; });
+
+    bindRange(prefix + "XRange", prefix + "XValue", (v) => { st().x = v / 100; }, (v) => v + "%");
+    bindRange(prefix + "YRange", prefix + "YValue", (v) => { st().y = v / 100; }, (v) => v + "%");
+    bindRange(prefix + "StretchXRange", prefix + "StretchXValue", (v) => { st().stretchX = v / 100; }, (v) => v + "%");
+    bindRange(prefix + "StretchYRange", prefix + "StretchYValue", (v) => { st().stretchY = v / 100; }, (v) => v + "%");
+  }
+
+  function syncTextLayerUi(prefix, layer) {
+    const s = layer.style;
+    const set = (id, prop, value) => { const el = document.getElementById(id); if (el) el[prop] = value; };
+    set(prefix + "FontSelect", "value", s.fontKey);
+    set(prefix + "BoldCheck", "checked", s.bold);
+    set(prefix + "ItalicCheck", "checked", s.italic);
+    set(prefix + "ColorPicker", "value", s.color);
+    set(prefix + "OutlineColor", "value", s.outlineColor);
+    set(prefix + "GlowColor", "value", s.glowColor);
+    set(prefix + "PlateColor", "value", s.plateColor);
+    setSlider(prefix + "SizeRange", s.size);
+    setSlider(prefix + "TrackRange", s.tracking);
+    setSlider(prefix + "OpacityRange", Math.round(s.opacity * 100));
+    setSlider(prefix + "OutlineRange", s.outlineWidth);
+    setSlider(prefix + "GlowRange", s.glowWidth);
+    setSlider(prefix + "ShadowRange", Math.round(s.shadowOpacity * 100));
+    setSlider(prefix + "ShadowBlurRange", s.shadowBlur);
+    setSlider(prefix + "ShadowOffRange", s.shadowOffsetY);
+    setSlider(prefix + "PlateRange", Math.round(s.plateOpacity * 100));
+    setSlider(prefix + "XRange", Math.round(s.x * 100));
+    setSlider(prefix + "YRange", Math.round(s.y * 100));
+    setSlider(prefix + "StretchXRange", Math.round(s.stretchX * 100));
+    setSlider(prefix + "StretchYRange", Math.round(s.stretchY * 100));
+  }
+
+  fillFontSelect("clockFontSelect", state.clock.style.fontKey);
+  fillFontSelect("dateFontSelect", state.date.style.fontKey);
+  bindTextLayer("clock", () => state.clock);
+  bindTextLayer("date", () => state.date);
+
+  // --- specifico orologio ---
   const customTextGroup = document.getElementById("customTextGroup");
   const clockFormatGroup = document.getElementById("clockFormatGroup");
 
@@ -659,165 +864,88 @@
 
   bindCheck("clockEnabledCheck", (v) => { state.clock.enabled = v; });
   bindSelect("clockFormatSelect", (v) => { state.clock.format = v; });
-  bindSelect("clockFontSelect", (v) => { state.clock.style.fontKey = v; });
-  bindCheck("clockBoldCheck", (v) => { state.clock.style.bold = v; });
-  bindCheck("clockItalicCheck", (v) => { state.clock.style.italic = v; });
-  bindCheck("clockShadowCheck", (v) => { state.clock.style.shadow = v; });
-  bindRange("clockSizeRange", "clockSizeValue", (v) => { state.clock.style.size = v; });
-  bindRange("clockTrackRange", "clockTrackValue", (v) => { state.clock.style.tracking = v; });
-  bindRange("clockOpacityRange", "clockOpacityValue", (v) => { state.clock.style.opacity = v / 100; }, (v) => v + "%");
-  bindRange("clockXRange", "clockXValue", (v) => { state.clock.style.x = v / 100; }, (v) => v + "%");
-  bindRange("clockYRange", "clockYValue", (v) => { state.clock.style.y = v / 100; }, (v) => v + "%");
-  bindRange("clockStretchXRange", "clockStretchXValue", (v) => { state.clock.style.stretchX = v / 100; }, (v) => v + "%");
-  bindRange("clockStretchYRange", "clockStretchYValue", (v) => { state.clock.style.stretchY = v / 100; }, (v) => v + "%");
-  document.getElementById("clockColorPicker").addEventListener("input", (e) => {
-    state.clock.style.color = e.target.value;
-    renderPreview();
-  });
 
   document.getElementById("clockResetBtn").addEventListener("click", () => {
     state.clock.style = defaultStyle(150, 0.30, true);
-    syncClockUi();
+    syncTextLayerUi("clock", state.clock);
     renderPreview();
     showToast("Orologio ripristinato");
   });
 
-  // ===========================================================================
-  // TAB DATA
-  // ===========================================================================
+  // --- specifico data ---
   bindCheck("dateEnabledCheck", (v) => { state.date.enabled = v; });
   bindSelect("dateFormatSelect", (v) => { state.date.format = v; });
   bindCheck("dateUppercaseCheck", (v) => { state.date.uppercase = v; });
-  bindSelect("dateFontSelect", (v) => { state.date.style.fontKey = v; });
-  bindCheck("dateBoldCheck", (v) => { state.date.style.bold = v; });
-  bindCheck("dateItalicCheck", (v) => { state.date.style.italic = v; });
-  bindCheck("dateShadowCheck", (v) => { state.date.style.shadow = v; });
-  bindRange("dateSizeRange", "dateSizeValue", (v) => { state.date.style.size = v; });
-  bindRange("dateTrackRange", "dateTrackValue", (v) => { state.date.style.tracking = v; });
-  bindRange("dateOpacityRange", "dateOpacityValue", (v) => { state.date.style.opacity = v / 100; }, (v) => v + "%");
-  bindRange("dateXRange", "dateXValue", (v) => { state.date.style.x = v / 100; }, (v) => v + "%");
-  bindRange("dateYRange", "dateYValue", (v) => { state.date.style.y = v / 100; }, (v) => v + "%");
-  bindRange("dateStretchXRange", "dateStretchXValue", (v) => { state.date.style.stretchX = v / 100; }, (v) => v + "%");
-  bindRange("dateStretchYRange", "dateStretchYValue", (v) => { state.date.style.stretchY = v / 100; }, (v) => v + "%");
-  document.getElementById("dateColorPicker").addEventListener("input", (e) => {
-    state.date.style.color = e.target.value;
-    renderPreview();
-  });
 
   document.getElementById("dateResetBtn").addEventListener("click", () => {
     state.date.style = defaultStyle(38, 0.38, false);
-    syncDateUi();
+    syncTextLayerUi("date", state.date);
     renderPreview();
     showToast("Data ripristinata");
   });
 
   // ===========================================================================
-  // TAB SFONDO
+  // SFONDO
   // ===========================================================================
-  bindRange("bgScaleRange", "bgScaleValue", (v) => { state.bg.scale = v / 100; }, (v) => v + "%");
+  bindRange("bgScaleRange", "bgScaleValue", (v) => { state.bg.scale = sliderToScale(v); }, scaleFormatter);
   bindRange("bgXRange", "bgXValue", (v) => { state.bg.offX = v / 100; });
   bindRange("bgYRange", "bgYValue", (v) => { state.bg.offY = v / 100; });
   bindRange("bgRotationRange", "bgRotationValue", (v) => { state.bg.rotation = v; }, (v) => v + "°");
   bindRange("dimRange", "dimValue", (v) => { state.bgDim = v; }, (v) => v + "%");
+  bindCheck("linkFgCheck", (v) => { state.linkFgToBg = v; });
 
   function quickRotate(delta) {
     let next = (state.bg.rotation + delta) % 360;
     if (next > 180) next -= 360;
     if (next < -180) next += 360;
-    state.bg.rotation = next;
-    setRange("bgRotationRange", "bgRotationValue", next, (v) => v + "°");
+    setSlider("bgRotationRange", next);
     renderPreview();
   }
   document.getElementById("bgRotateLeftBtn").addEventListener("click", () => quickRotate(-90));
   document.getElementById("bgRotateRightBtn").addEventListener("click", () => quickRotate(90));
 
   document.getElementById("bgResetBtn").addEventListener("click", () => {
-    state.bg.scale = 1; state.bg.offX = 0; state.bg.offY = 0; state.bg.rotation = 0; state.bgDim = 0;
-    setRange("bgScaleRange", "bgScaleValue", 100, (v) => v + "%");
-    setRange("bgXRange", "bgXValue", 0);
-    setRange("bgYRange", "bgYValue", 0);
-    setRange("bgRotationRange", "bgRotationValue", 0, (v) => v + "°");
-    setRange("dimRange", "dimValue", 0, (v) => v + "%");
+    setSlider("bgScaleRange", 0);
+    setSlider("bgXRange", 0);
+    setSlider("bgYRange", 0);
+    setSlider("bgRotationRange", 0);
+    setSlider("dimRange", 0);
     renderPreview();
     showToast("Sfondo ripristinato");
   });
 
   // ===========================================================================
-  // TAB SOGGETTO
+  // SOGGETTO
   // ===========================================================================
-  bindRange("fgScaleRange", "fgScaleValue", (v) => { state.fg.scale = v / 100; }, (v) => v + "%");
+  bindRange("fgScaleRange", "fgScaleValue", (v) => { state.fg.scale = sliderToScale(v); }, scaleFormatter);
   bindRange("fgXRange", "fgXValue", (v) => { state.fg.offX = v / 100; });
   bindRange("fgYRange", "fgYValue", (v) => { state.fg.offY = v / 100; });
 
   document.getElementById("fgResetBtn").addEventListener("click", () => {
-    state.fg.scale = 1; state.fg.offX = 0; state.fg.offY = 0;
-    setRange("fgScaleRange", "fgScaleValue", 100, (v) => v + "%");
-    setRange("fgXRange", "fgXValue", 0);
-    setRange("fgYRange", "fgYValue", 0);
+    setSlider("fgScaleRange", 0);
+    setSlider("fgXRange", 0);
+    setSlider("fgYRange", 0);
     renderPreview();
     showToast("Soggetto riportato nella posizione originale");
   });
 
-  // ===========================================================================
-  // SINCRONIZZAZIONE UI <- STATO
-  // ===========================================================================
-  function syncClockUi() {
-    const s = state.clock.style;
-    document.getElementById("clockEnabledCheck").checked = state.clock.enabled;
-    document.getElementById("clockFormatSelect").value = state.clock.format;
-    document.getElementById("customTextInput").value = state.clock.customText;
-    document.getElementById("clockFontSelect").value = s.fontKey;
-    document.getElementById("clockBoldCheck").checked = s.bold;
-    document.getElementById("clockItalicCheck").checked = s.italic;
-    document.getElementById("clockShadowCheck").checked = s.shadow;
-    document.getElementById("clockColorPicker").value = s.color;
-    setRange("clockSizeRange", "clockSizeValue", s.size);
-    setRange("clockTrackRange", "clockTrackValue", s.tracking);
-    setRange("clockOpacityRange", "clockOpacityValue", Math.round(s.opacity * 100), (v) => v + "%");
-    setRange("clockXRange", "clockXValue", Math.round(s.x * 100), (v) => v + "%");
-    setRange("clockYRange", "clockYValue", Math.round(s.y * 100), (v) => v + "%");
-    setRange("clockStretchXRange", "clockStretchXValue", Math.round(s.stretchX * 100), (v) => v + "%");
-    setRange("clockStretchYRange", "clockStretchYValue", Math.round(s.stretchY * 100), (v) => v + "%");
-    document.querySelectorAll("#clockModeSeg .seg-btn").forEach((b) => {
-      b.classList.toggle("active", b.dataset.mode === state.clock.mode);
-    });
-    syncClockMode();
-  }
-
-  function syncDateUi() {
-    const s = state.date.style;
-    document.getElementById("dateEnabledCheck").checked = state.date.enabled;
-    document.getElementById("dateFormatSelect").value = state.date.format;
-    document.getElementById("dateUppercaseCheck").checked = state.date.uppercase;
-    document.getElementById("dateFontSelect").value = s.fontKey;
-    document.getElementById("dateBoldCheck").checked = s.bold;
-    document.getElementById("dateItalicCheck").checked = s.italic;
-    document.getElementById("dateShadowCheck").checked = s.shadow;
-    document.getElementById("dateColorPicker").value = s.color;
-    setRange("dateSizeRange", "dateSizeValue", s.size);
-    setRange("dateTrackRange", "dateTrackValue", s.tracking);
-    setRange("dateOpacityRange", "dateOpacityValue", Math.round(s.opacity * 100), (v) => v + "%");
-    setRange("dateXRange", "dateXValue", Math.round(s.x * 100), (v) => v + "%");
-    setRange("dateYRange", "dateYValue", Math.round(s.y * 100), (v) => v + "%");
-    setRange("dateStretchXRange", "dateStretchXValue", Math.round(s.stretchX * 100), (v) => v + "%");
-    setRange("dateStretchYRange", "dateStretchYValue", Math.round(s.stretchY * 100), (v) => v + "%");
-  }
-
   function syncImageUi() {
-    setRange("bgScaleRange", "bgScaleValue", Math.round(state.bg.scale * 100), (v) => v + "%");
-    setRange("bgXRange", "bgXValue", Math.round(state.bg.offX * 100));
-    setRange("bgYRange", "bgYValue", Math.round(state.bg.offY * 100));
-    setRange("bgRotationRange", "bgRotationValue", Math.round(state.bg.rotation), (v) => v + "°");
-    setRange("dimRange", "dimValue", Math.round(state.bgDim), (v) => v + "%");
-    setRange("fgScaleRange", "fgScaleValue", Math.round(state.fg.scale * 100), (v) => v + "%");
-    setRange("fgXRange", "fgXValue", Math.round(state.fg.offX * 100));
-    setRange("fgYRange", "fgYValue", Math.round(state.fg.offY * 100));
+    setSlider("bgScaleRange", scaleToSlider(state.bg.scale));
+    setSlider("bgXRange", Math.round(state.bg.offX * 100));
+    setSlider("bgYRange", Math.round(state.bg.offY * 100));
+    setSlider("bgRotationRange", Math.round(state.bg.rotation));
+    setSlider("dimRange", Math.round(state.bgDim));
+    setSlider("fgScaleRange", scaleToSlider(state.fg.scale));
+    setSlider("fgXRange", Math.round(state.fg.offX * 100));
+    setSlider("fgYRange", Math.round(state.fg.offY * 100));
+    const link = document.getElementById("linkFgCheck");
+    if (link) link.checked = state.linkFgToBg;
   }
 
   // ===========================================================================
-  // TRASCINAMENTO DI OROLOGIO E DATA SULL'ANTEPRIMA
+  // TRASCINAMENTO SULL'ANTEPRIMA
   // ===========================================================================
-  let dragTarget = null; // "clock" | "date"
+  let dragTarget = null;
 
   function canvasPointFromEvent(evt) {
     const rect = canvas.getBoundingClientRect();
@@ -840,8 +968,7 @@
     const p = canvasPointFromEvent(evt);
     const dDate = state.date.enabled ? boxDistance(hitBoxes.date, p.xFrac, p.yFrac) : Infinity;
     const dClock = state.clock.enabled ? boxDistance(hitBoxes.clock, p.xFrac, p.yFrac) : Infinity;
-    const best = Math.min(dDate, dClock);
-    if (best > 0.06) return; // tocco lontano da entrambi: nessun trascinamento
+    if (Math.min(dDate, dClock) > 0.06) return;
     dragTarget = dDate <= dClock ? "date" : "clock";
     dragHint.style.opacity = "0";
     evt.preventDefault();
@@ -850,12 +977,9 @@
   function handlePointerMove(evt) {
     if (!dragTarget) return;
     const p = canvasPointFromEvent(evt);
-    const style = dragTarget === "date" ? state.date.style : state.clock.style;
-    style.x = p.xFrac;
-    style.y = p.yFrac;
-    const prefix = dragTarget === "date" ? "date" : "clock";
-    setRange(prefix + "XRange", prefix + "XValue", Math.round(p.xFrac * 100), (v) => v + "%");
-    setRange(prefix + "YRange", prefix + "YValue", Math.round(p.yFrac * 100), (v) => v + "%");
+    const prefix = dragTarget;
+    setSlider(prefix + "XRange", Math.round(p.xFrac * 100));
+    setSlider(prefix + "YRange", Math.round(p.yFrac * 100));
     renderPreview();
     evt.preventDefault();
   }
@@ -873,28 +997,23 @@
   canvas.addEventListener("touchend", handlePointerUp);
 
   // ===========================================================================
-  // CONFIG JSON + AZIONI PRINCIPALI
+  // CONFIG + AZIONI
   // ===========================================================================
   function styleJson(s) {
     return {
-      fontKey: s.fontKey,
-      bold: s.bold,
-      italic: s.italic,
-      size: s.size,
-      color: s.color,
-      opacity: s.opacity,
-      x: s.x,
-      y: s.y,
-      stretchX: s.stretchX,
-      stretchY: s.stretchY,
-      tracking: s.tracking,
-      shadow: s.shadow,
+      fontKey: s.fontKey, bold: s.bold, italic: s.italic, size: s.size,
+      color: s.color, opacity: s.opacity, x: s.x, y: s.y,
+      stretchX: s.stretchX, stretchY: s.stretchY, tracking: s.tracking,
+      outlineWidth: s.outlineWidth, outlineColor: s.outlineColor,
+      glowWidth: s.glowWidth, glowColor: s.glowColor,
+      shadowOpacity: s.shadowOpacity, shadowBlur: s.shadowBlur, shadowOffsetY: s.shadowOffsetY,
+      plateOpacity: s.plateOpacity, plateColor: s.plateColor,
     };
   }
 
   function buildConfig() {
     return {
-      version: 2,
+      version: 3,
       clock: {
         enabled: state.clock.enabled,
         mode: state.clock.mode,
@@ -916,6 +1035,7 @@
       fgScale: state.fg.scale,
       fgOffX: state.fg.offX,
       fgOffY: state.fg.offY,
+      linkFgToBg: state.linkFgToBg,
     };
   }
 
@@ -963,7 +1083,7 @@
   };
 
   // ===========================================================================
-  // RIPRISTINO DELLA SESSIONE PRECEDENTE (icona ingranaggio / riapertura app)
+  // RIPRISTINO SESSIONE
   // ===========================================================================
   function applyConfig(cfg) {
     if (!cfg) return;
@@ -989,11 +1109,24 @@
       state.fg.scale = Number(cfg.fgScale) || 1;
       state.fg.offX = Number(cfg.fgOffX) || 0;
       state.fg.offY = Number(cfg.fgOffY) || 0;
-      syncClockUi();
-      syncDateUi();
+      state.linkFgToBg = !!cfg.linkFgToBg;
+
+      document.getElementById("clockEnabledCheck").checked = state.clock.enabled;
+      document.getElementById("clockFormatSelect").value = state.clock.format;
+      document.getElementById("customTextInput").value = state.clock.customText;
+      document.querySelectorAll("#clockModeSeg .seg-btn").forEach((b) => {
+        b.classList.toggle("active", b.dataset.mode === state.clock.mode);
+      });
+      syncClockMode();
+      document.getElementById("dateEnabledCheck").checked = state.date.enabled;
+      document.getElementById("dateFormatSelect").value = state.date.format;
+      document.getElementById("dateUppercaseCheck").checked = state.date.uppercase;
+
+      syncTextLayerUi("clock", state.clock);
+      syncTextLayerUi("date", state.date);
       syncImageUi();
     } catch (e) {
-      // configurazione vecchia o incompleta: si riparte dai valori di default
+      // configurazione vecchia o incompleta: si resta sui valori attuali
     }
   }
 
@@ -1004,7 +1137,7 @@
 
     if (bgDataUrl) {
       state.photoDataUrl = bgDataUrl;
-      setBackground(bgDataUrl, false);
+      setBackground(bgDataUrl, false, false);
     }
     if (fgDataUrl) {
       const img = new Image();
@@ -1022,10 +1155,10 @@
   };
 
   // ===========================================================================
-  // INIZIALIZZAZIONE
+  // INIT
   // ===========================================================================
-  syncClockUi();
-  syncDateUi();
+  syncTextLayerUi("clock", state.clock);
+  syncTextLayerUi("date", state.date);
   syncImageUi();
   renderPreview();
 
