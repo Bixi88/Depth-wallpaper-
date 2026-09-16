@@ -458,6 +458,16 @@
       <label>Dimensione pennello <span class="value-badge" id="cutoutBrushValue">30</span></label>
       <input type="range" id="cutoutBrushRange" min="6" max="120" value="30" data-center="30" />
     </div>
+    <div class="field-group">
+      <label>Contorno ritaglio <span class="value-badge" id="cutoutOffsetValue">0 px</span></label>
+      <input type="range" id="cutoutOffsetRange" min="-20" max="20" value="0" data-center="0" />
+      <p class="hint-text">A sinistra riduce il ritaglio pixel per pixel su tutto il perimetro: utile per togliere il bordino chiaro che resta quando lo sfondo originale era simile al soggetto. A destra lo allarga.</p>
+    </div>
+    <div class="field-group">
+      <label>Bordo bianco adesivo <span class="value-badge" id="cutoutOutlineValue">0 px</span></label>
+      <input type="range" id="cutoutOutlineRange" min="0" max="80" value="0" data-center="0" />
+      <p class="hint-text">Aggiunge un contorno bianco pieno attorno al soggetto, come uno sticker.</p>
+    </div>
     <div class="cutout-actions-row">
       <button id="cutoutResetBtn" class="upload-btn ghost">Ricomincia da AI</button>
       <button id="cutoutClearBtn" class="upload-btn ghost">Svuota tutto</button>

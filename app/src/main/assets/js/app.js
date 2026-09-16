@@ -716,9 +716,14 @@
 
   let cutoutSourceCanvas = null;
   let cutoutMaskCanvas = null;
+  let cutoutMaskedSubjectCanvas = null;
   let cutoutTool = "brush";
   let cutoutBrushSize = 30;
   let cutoutDrawing = false;
+  // Contorno ritaglio (eroderlo/dilata la maschera di N px) e bordo bianco adesivo:
+  // entrambi a 0 all'apertura dell'editor, come richiesto ("sempre inizialmente centrale").
+  let cutoutMaskOffsetPx = 0;
+  let cutoutOutlineWidthPx = 0;
 
   function openCutoutEditor(dataUrl) {
     const img = new Image();
@@ -745,12 +750,107 @@
       cutoutCanvas.width = w;
       cutoutCanvas.height = h;
 
+      cutoutMaskOffsetPx = 0;
+      cutoutOutlineWidthPx = 0;
+      setSlider("cutoutOffsetRange", 0);
+      setSlider("cutoutOutlineRange", 0);
+
       cutoutModal.classList.remove("hidden");
       renderCutoutPreview();
       requestAiCutout();
     };
     img.onerror = () => showToast("Immagine non valida");
     img.src = dataUrl;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Contorno ritaglio ed erosione/dilatazione della maschera (via canvas 2D)
+  // ---------------------------------------------------------------------------
+  // Il Canvas non offre operazioni morfologiche pronte, quindi la maschera si
+  // "cresce" o "restringe" con un min/max filter separabile sul canale alpha:
+  // un passaggio orizzontale seguito da uno verticale con la stessa finestra
+  // equivale esattamente a un min/max su un intorno quadrato di lato 2r+1.
+  // radius positivo = dilata (allarga), negativo = erode (restringe).
+
+  /** Massimo/minimo scorrevole in O(n) con una coda monotona: usato sia in
+   *  orizzontale sia in verticale per far scalare bene anche foto grandi. */
+  function slidingExtreme(arr, n, r, useMax) {
+    const out = new Uint8ClampedArray(n);
+    const dq = new Int32Array(n);
+    let head = 0, tail = 0, lastAdded = -1;
+    for (let j = 0; j < n; j++) {
+      const iAdd = Math.min(n - 1, j + r);
+      while (lastAdded < iAdd) {
+        lastAdded++;
+        const v = arr[lastAdded];
+        while (tail > head && (useMax ? arr[dq[tail - 1]] <= v : arr[dq[tail - 1]] >= v)) tail--;
+        dq[tail++] = lastAdded;
+      }
+      const leftBound = Math.max(0, j - r);
+      while (dq[head] < leftBound) head++;
+      out[j] = arr[dq[head]];
+    }
+    return out;
+  }
+
+  /** Restituisce una nuova maschera (bianco pieno, solo alpha variabile) cresciuta
+   *  o ristretta di radiusPx pixel rispetto a maskCanvas. radiusPx = 0 -> stessa maschera. */
+  function erodeDilateAlpha(maskCanvas, radiusPx) {
+    const r = Math.round(radiusPx);
+    if (!r) return maskCanvas;
+    const useMax = r > 0;
+    const rad = Math.abs(r);
+    const w = maskCanvas.width, h = maskCanvas.height;
+    const src = maskCanvas.getContext("2d").getImageData(0, 0, w, h).data;
+
+    const alpha = new Uint8ClampedArray(w * h);
+    for (let i = 0; i < w * h; i++) alpha[i] = src[i * 4 + 3];
+
+    const tmp = new Uint8ClampedArray(w * h);
+    const rowBuf = new Uint8ClampedArray(w);
+    for (let y = 0; y < h; y++) {
+      const off = y * w;
+      for (let x = 0; x < w; x++) rowBuf[x] = alpha[off + x];
+      tmp.set(slidingExtreme(rowBuf, w, rad, useMax), off);
+    }
+
+    const out = new Uint8ClampedArray(w * h);
+    const colBuf = new Uint8ClampedArray(h);
+    for (let x = 0; x < w; x++) {
+      for (let y = 0; y < h; y++) colBuf[y] = tmp[y * w + x];
+      const colOut = slidingExtreme(colBuf, h, rad, useMax);
+      for (let y = 0; y < h; y++) out[y * w + x] = colOut[y];
+    }
+
+    const outCanvas = document.createElement("canvas");
+    outCanvas.width = w;
+    outCanvas.height = h;
+    const octx = outCanvas.getContext("2d");
+    const outData = octx.createImageData(w, h);
+    for (let i = 0; i < w * h; i++) {
+      outData.data[i * 4] = 255;
+      outData.data[i * 4 + 1] = 255;
+      outData.data[i * 4 + 2] = 255;
+      outData.data[i * 4 + 3] = out[i];
+    }
+    octx.putImageData(outData, 0, 0);
+    return outCanvas;
+  }
+
+  /** Foto ritagliata con la maschera effettiva applicata, su un canvas riusato
+   *  per non riallocarne uno nuovo a ogni frame durante il disegno col pennello. */
+  function buildMaskedSubject(effectiveMask) {
+    if (!cutoutMaskedSubjectCanvas) cutoutMaskedSubjectCanvas = document.createElement("canvas");
+    const c = cutoutMaskedSubjectCanvas;
+    c.width = cutoutSourceCanvas.width;
+    c.height = cutoutSourceCanvas.height;
+    const g = c.getContext("2d");
+    g.clearRect(0, 0, c.width, c.height);
+    g.drawImage(cutoutSourceCanvas, 0, 0);
+    g.globalCompositeOperation = "destination-in";
+    g.drawImage(effectiveMask, 0, 0);
+    g.globalCompositeOperation = "source-over";
+    return c;
   }
 
   function requestAiCutout() {
@@ -780,10 +880,21 @@
 
   function renderCutoutPreview() {
     cutoutCtx.clearRect(0, 0, cutoutCanvas.width, cutoutCanvas.height);
-    cutoutCtx.drawImage(cutoutSourceCanvas, 0, 0);
-    cutoutCtx.globalCompositeOperation = "destination-in";
-    cutoutCtx.drawImage(cutoutMaskCanvas, 0, 0);
-    cutoutCtx.globalCompositeOperation = "source-over";
+
+    const effectiveMask = cutoutMaskOffsetPx
+      ? erodeDilateAlpha(cutoutMaskCanvas, cutoutMaskOffsetPx)
+      : cutoutMaskCanvas;
+
+    if (cutoutOutlineWidthPx > 0) {
+      const outlineMask = erodeDilateAlpha(effectiveMask, cutoutOutlineWidthPx);
+      cutoutCtx.fillStyle = "#ffffff";
+      cutoutCtx.fillRect(0, 0, cutoutCanvas.width, cutoutCanvas.height);
+      cutoutCtx.globalCompositeOperation = "destination-in";
+      cutoutCtx.drawImage(outlineMask, 0, 0);
+      cutoutCtx.globalCompositeOperation = "source-over";
+    }
+
+    cutoutCtx.drawImage(buildMaskedSubject(effectiveMask), 0, 0);
   }
 
   function cutoutCanvasPoint(evt) {
@@ -837,6 +948,16 @@
   });
 
   bindRange("cutoutBrushRange", "cutoutBrushValue", (v) => { cutoutBrushSize = v; });
+  bindRange(
+    "cutoutOffsetRange", "cutoutOffsetValue",
+    (v) => { cutoutMaskOffsetPx = v; renderCutoutPreview(); },
+    (v) => (v > 0 ? "+" : "") + v + " px"
+  );
+  bindRange(
+    "cutoutOutlineRange", "cutoutOutlineValue",
+    (v) => { cutoutOutlineWidthPx = v; renderCutoutPreview(); },
+    (v) => v + " px"
+  );
 
   document.getElementById("cutoutResetBtn").addEventListener("click", requestAiCutout);
 
