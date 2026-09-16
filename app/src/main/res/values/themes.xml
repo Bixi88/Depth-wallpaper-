@@ -5,7 +5,7 @@
         Il tema precedente era Theme.Material.Light.NoActionBar: da li' arrivava la
         barra di stato chiara sopra un'interfaccia completamente nera. Qui usiamo il
         tema scuro e forziamo barra di stato, barra di navigazione e sfondo finestra
-        sullo stesso nero dell'app (var(--bg-0) in assets/css/style.css).
+        sullo stesso nero dell'app (variabile bg-0 in assets/css/style.css).
     -->
     <style name="Theme.DepthWallpaper" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/app_background</item>

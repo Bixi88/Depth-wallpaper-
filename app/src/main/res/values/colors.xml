@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Stesso nero di --bg-0 nel CSS dell'editor. -->
+    <!-- Stesso nero della variabile bg-0 nel CSS dell'editor. -->
     <color name="app_background">#000000</color>
 </resources>
