@@ -135,7 +135,12 @@ object DepthRenderer {
         "oswald" to Pair("fonts/Oswald-Regular.ttf", "fonts/Oswald-Bold.ttf"),
         "oswaldLight" to Pair("fonts/Oswald-Light.ttf", null),
         "bigShoulders" to Pair("fonts/BigShoulders-Regular.ttf", "fonts/BigShoulders-Bold.ttf"),
-        "bigShouldersBlack" to Pair("fonts/BigShoulders-Black.ttf", null)
+        "bigShouldersBlack" to Pair("fonts/BigShoulders-Black.ttf", null),
+        // --- font acquistati dall'utente ---
+        "diosaRubia" to Pair("fonts/DiosaRubia-Light.ttf", null),
+        "tightenCaps" to Pair("fonts/TightenCaps-ExtraLight.otf", null),
+        "skyscraper" to Pair("fonts/Skyscraper-Condensed.ttf", null),
+        "sensationalSans" to Pair("fonts/SensationalSans-Light.ttf", null)
     )
 
     private var assetManager: AssetManager? = null

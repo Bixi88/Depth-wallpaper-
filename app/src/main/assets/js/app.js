@@ -27,6 +27,11 @@
     { key: "oswaldLight", label: "Oswald Light", css: "'Oswald Light', sans-serif", bundled: true },
     { key: "bigShoulders", label: "Big Shoulders", css: "'Big Shoulders', sans-serif", bundled: true },
     { key: "bigShouldersBlack", label: "Big Shoulders Black", css: "'Big Shoulders Black', sans-serif", bundled: true },
+    // --- font acquistati dall'utente ---
+    { key: "diosaRubia", label: "Diosa Rubia", css: "'Diosa Rubia', sans-serif", bundled: true },
+    { key: "tightenCaps", label: "Tighten Caps", css: "'Tighten Caps', sans-serif", bundled: true },
+    { key: "skyscraper", label: "Skyscraper Condensed", css: "'Skyscraper Condensed', sans-serif", bundled: true },
+    { key: "sensationalSans", label: "Sensational Sans", css: "'Sensational Sans', sans-serif", bundled: true },
   ];
 
   /**

@@ -84,6 +84,35 @@
   font-style: normal;
   font-display: block;
 }
+/* --- font acquistati dall'utente, licenza commerciale (nessun file di licenza incluso) --- */
+@font-face {
+  font-family: "Diosa Rubia";
+  src: url("../fonts/DiosaRubia-Light.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Tighten Caps";
+  src: url("../fonts/TightenCaps-ExtraLight.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Skyscraper Condensed";
+  src: url("../fonts/Skyscraper-Condensed.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Sensational Sans";
+  src: url("../fonts/SensationalSans-Light.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
 
 :root {
   --bg-0: #000000;
