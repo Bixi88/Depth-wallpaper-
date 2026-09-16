@@ -17,6 +17,7 @@
         android:label="@string/app_name"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:hardwareAccelerated="true"
+        android:largeHeap="true"
         android:supportsRtl="true">
 
         <!-- Scarica il modello di ritaglio soggetto (ML Kit) in background dopo

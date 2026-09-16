@@ -3,55 +3,96 @@ package com.depthwallpaper.creator
 import org.json.JSONObject
 
 /**
- * Rappresenta le impostazioni dell'orologio (Livello 1) cosi' come configurate
- * nell'editor (assets/js/app.js -> stato "clock").
+ * Impostazioni comuni a un livello di testo (orologio oppure data).
+ * Orologio e data sono due livelli COMPLETAMENTE indipendenti: font, dimensione,
+ * colore, opacita', posizione e deformazione si impostano separatamente.
  */
-data class ClockConfig(
-    val mode: String,       // "time" | "custom"
-    val customText: String,
-    val showDate: Boolean,
-    val fontKey: String,    // "sans" | "serif" | "monospace" | "condensed"
+data class TextLayerConfig(
+    val fontKey: String,    // vedi DepthRenderer.typefaceFor
     val bold: Boolean,
-    val size: Float,        // in px, alla risoluzione logica 1080x1920 dell'editor
+    val italic: Boolean,
+    val size: Float,        // px alla larghezza di riferimento 1080 dell'editor
     val color: String,      // "#rrggbb"
     val opacity: Float,     // 0..1
     val x: Float,           // 0..1 relativo alla larghezza
     val y: Float,           // 0..1 relativo all'altezza
-    val stretchX: Float,    // 1 = normale; >1 allarga orizzontalmente, <1 restringe
-    val stretchY: Float     // 1 = normale; >1 allunga verticalmente, <1 schiaccia
+    val stretchX: Float,    // 1 = normale
+    val stretchY: Float,    // 1 = normale
+    val tracking: Float,    // spaziatura tra le lettere, px @1080
+    val shadow: Boolean
+) {
+    companion object {
+        fun fromJson(o: JSONObject?, defSize: Float, defY: Float): TextLayerConfig {
+            val j = o ?: JSONObject()
+            return TextLayerConfig(
+                fontKey = j.optString("fontKey", "sans"),
+                bold = j.optBoolean("bold", true),
+                italic = j.optBoolean("italic", false),
+                size = j.optDouble("size", defSize.toDouble()).toFloat(),
+                color = j.optString("color", "#ffffff"),
+                opacity = j.optDouble("opacity", 1.0).toFloat(),
+                x = j.optDouble("x", 0.5).toFloat(),
+                y = j.optDouble("y", defY.toDouble()).toFloat(),
+                stretchX = j.optDouble("stretchX", 1.0).toFloat(),
+                stretchY = j.optDouble("stretchY", 1.0).toFloat(),
+                tracking = j.optDouble("tracking", 0.0).toFloat(),
+                shadow = j.optBoolean("shadow", true)
+            )
+        }
+
+        fun default(size: Float, y: Float) = TextLayerConfig(
+            fontKey = "sans", bold = true, italic = false, size = size,
+            color = "#ffffff", opacity = 1f, x = 0.5f, y = y,
+            stretchX = 1f, stretchY = 1f, tracking = 0f, shadow = true
+        )
+    }
+}
+
+/** Livello 1a: orologio. */
+data class ClockConfig(
+    val enabled: Boolean,
+    val mode: String,       // "time" | "custom"
+    val customText: String,
+    val format: String,     // "24" | "24short" | "12" | "12ampm"
+    val style: TextLayerConfig
 )
 
-/** Configurazione completa dei 3 layer, cosi' come esportata dall'editor. */
+/** Livello 1b: data (indipendente dall'orologio, puo' essere nascosta). */
+data class DateConfig(
+    val enabled: Boolean,
+    val format: String,     // "full" | "fullYear" | "dayMonth" | "short" | "numeric" | "weekday"
+    val uppercase: Boolean,
+    val style: TextLayerConfig
+)
+
+/** Configurazione completa esportata dall'editor. */
 data class WallpaperConfig(
     val clock: ClockConfig,
+    val date: DateConfig,
     val bgDim: Float,       // 0..100
     val bgScale: Float,
     val bgOffX: Float,      // -1..1
     val bgOffY: Float,
-    val bgRotation: Float,  // gradi, -180..180
-    val fgScale: Float,
-    val fgOffX: Float,      // -1..1
-    val fgOffY: Float,
-    val fgRotation: Float,  // gradi, -180..180
-    val parallaxEnabled: Boolean
+    val bgRotation: Float,  // gradi
+    val fgScale: Float,     // 1 = soggetto esattamente dov'era nella foto
+    val fgOffX: Float,      // -1..1, scostamento aggiuntivo
+    val fgOffY: Float
 ) {
     companion object {
 
-        /** Configurazione di sicurezza usata se il JSON manca o non è valido. */
         fun default(): WallpaperConfig = WallpaperConfig(
             clock = ClockConfig(
+                enabled = true,
                 mode = "time",
                 customText = "",
-                showDate = true,
-                fontKey = "sans",
-                bold = true,
-                size = 140f,
-                color = "#ffffff",
-                opacity = 1f,
-                x = 0.5f,
-                y = 0.35f,
-                stretchX = 1f,
-                stretchY = 1f
+                format = "24",
+                style = TextLayerConfig.default(150f, 0.30f)
+            ),
+            date = DateConfig(
+                enabled = true,
+                format = "full",
+                uppercase = false,
+                style = TextLayerConfig.default(38f, 0.38f).copy(bold = false)
             ),
             bgDim = 0f,
             bgScale = 1f,
@@ -60,32 +101,34 @@ data class WallpaperConfig(
             bgRotation = 0f,
             fgScale = 1f,
             fgOffX = 0f,
-            fgOffY = 0f,
-            fgRotation = 0f,
-            parallaxEnabled = true
+            fgOffY = 0f
         )
 
         fun fromJson(json: String?): WallpaperConfig {
             if (json.isNullOrBlank()) return default()
             return try {
                 val root = JSONObject(json)
+
                 val c = root.optJSONObject("clock") ?: JSONObject()
                 val clock = ClockConfig(
+                    enabled = c.optBoolean("enabled", true),
                     mode = c.optString("mode", "time"),
                     customText = c.optString("customText", ""),
-                    showDate = c.optBoolean("showDate", true),
-                    fontKey = c.optString("fontKey", "sans"),
-                    bold = c.optBoolean("bold", true),
-                    size = c.optDouble("size", 140.0).toFloat(),
-                    color = c.optString("color", "#ffffff"),
-                    opacity = c.optDouble("opacity", 1.0).toFloat(),
-                    x = c.optDouble("x", 0.5).toFloat(),
-                    y = c.optDouble("y", 0.35).toFloat(),
-                    stretchX = c.optDouble("stretchX", 1.0).toFloat(),
-                    stretchY = c.optDouble("stretchY", 1.0).toFloat()
+                    format = c.optString("format", "24"),
+                    style = TextLayerConfig.fromJson(c.optJSONObject("style"), 150f, 0.30f)
                 )
+
+                val d = root.optJSONObject("date") ?: JSONObject()
+                val date = DateConfig(
+                    enabled = d.optBoolean("enabled", true),
+                    format = d.optString("format", "full"),
+                    uppercase = d.optBoolean("uppercase", false),
+                    style = TextLayerConfig.fromJson(d.optJSONObject("style"), 38f, 0.38f)
+                )
+
                 WallpaperConfig(
                     clock = clock,
+                    date = date,
                     bgDim = root.optDouble("bgDim", 0.0).toFloat(),
                     bgScale = root.optDouble("bgScale", 1.0).toFloat(),
                     bgOffX = root.optDouble("bgOffX", 0.0).toFloat(),
@@ -93,11 +136,9 @@ data class WallpaperConfig(
                     bgRotation = root.optDouble("bgRotation", 0.0).toFloat(),
                     fgScale = root.optDouble("fgScale", 1.0).toFloat(),
                     fgOffX = root.optDouble("fgOffX", 0.0).toFloat(),
-                    fgOffY = root.optDouble("fgOffY", 0.0).toFloat(),
-                    fgRotation = root.optDouble("fgRotation", 0.0).toFloat(),
-                    parallaxEnabled = root.optBoolean("parallaxEnabled", true)
+                    fgOffY = root.optDouble("fgOffY", 0.0).toFloat()
                 )
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 default()
             }
         }

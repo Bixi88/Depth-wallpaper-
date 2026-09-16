@@ -352,6 +352,36 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        /**
+         * Ricarica nell'editor l'ultima configurazione applicata (config JSON + le due
+         * immagini). Serve quando si riapre l'app o si tocca l'ingranaggio nel selettore
+         * di sfondi animati: si riparte da dove si era rimasti invece che da zero.
+         */
+        @JavascriptInterface
+        fun requestSavedState() {
+            Thread {
+                var json: String? = null
+                var bg: String? = null
+                var fg: String? = null
+                try {
+                    json = ConfigStore.loadConfigJson(applicationContext)
+                    bg = fileToDataUrl(ConfigStore.bgFile(applicationContext), false)
+                    fg = fileToDataUrl(ConfigStore.fgFile(applicationContext), true)
+                } catch (e: Throwable) {
+                    // niente da ripristinare: si parte dai valori di default
+                }
+                val jsonArg = if (json != null) org.json.JSONObject.quote(json) else "null"
+                val bgArg = if (bg != null) org.json.JSONObject.quote(bg) else "null"
+                val fgArg = if (fg != null) org.json.JSONObject.quote(fg) else "null"
+                runOnUiThread {
+                    webView.evaluateJavascript(
+                        "window.onRestoreState && window.onRestoreState($jsonArg, $bgArg, $fgArg);",
+                        null
+                    )
+                }
+            }.start()
+        }
+
         /** Piccola utility per mostrare messaggi nativi (Toast) dal JS, se serve. */
         @JavascriptInterface
         fun showToast(message: String) {
@@ -382,10 +412,53 @@ class MainActivity : ComponentActivity() {
                     ConfigStore.notifyConfigUpdated(applicationContext)
 
                     openLiveWallpaperPicker()
-                } catch (e: Exception) {
-                    Toast.makeText(this@MainActivity, "Errore nel preparare lo sfondo animato", Toast.LENGTH_LONG).show()
+                } catch (e: Throwable) {
+                    android.util.Log.e("DepthWallpaper", "applyLiveWallpaper fallita", e)
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Errore nel preparare lo sfondo animato: ${e.message ?: e.javaClass.simpleName}",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
             }
+        }
+    }
+
+    /**
+     * Rilegge un layer salvato e lo restituisce come data URL gia' ridimensionato:
+     * ricaricare una foto a piena risoluzione dentro la WebView sarebbe inutilmente
+     * pesante e rischierebbe un OutOfMemoryError all'avvio.
+     */
+    private fun fileToDataUrl(file: java.io.File, keepAlpha: Boolean): String? {
+        if (!file.exists()) return null
+        return try {
+            val maxSide = if (keepAlpha) 1400 else 1600
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+            var sampleSize = 1
+            while (bounds.outWidth / sampleSize > maxSide || bounds.outHeight / sampleSize > maxSide) {
+                sampleSize *= 2
+            }
+            val bitmap = BitmapFactory.decodeFile(
+                file.absolutePath,
+                BitmapFactory.Options().apply { inSampleSize = sampleSize }
+            ) ?: return null
+
+            val out = ByteArrayOutputStream()
+            val mime: String
+            if (keepAlpha) {
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                mime = "image/png"
+            } else {
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                mime = "image/jpeg"
+            }
+            bitmap.recycle()
+            "data:$mime;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        } catch (e: Throwable) {
+            null
         }
     }
 

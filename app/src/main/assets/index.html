@@ -25,11 +25,10 @@
       <div id="canvas-frame">
         <canvas id="mainCanvas" width="1080" height="1920"></canvas>
         <div id="emptyState">
-          <p>Carica un'immagine di sfondo per iniziare</p>
+          <p>Carica una foto per iniziare</p>
         </div>
       </div>
-      <p id="dragHint">Suggerimento: trascina l'orologio direttamente sull'anteprima</p>
-      <p class="hint-text center">L'orologio si aggiorna dal vivo e resta sempre dietro al soggetto: il risultato è un vero sfondo animato, non un'immagine statica.</p>
+      <p id="dragHint">Trascina orologio e data direttamente sull'anteprima</p>
     </section>
 
     <!-- ============== PANNELLO CONTROLLI ============== -->
@@ -42,8 +41,14 @@
         <button class="tab-btn" data-tab="clock">
           <span class="tab-ico">&#8986;</span> Orologio
         </button>
-        <button class="tab-btn" data-tab="fx">
-          <span class="tab-ico">&#9881;</span> Effetti
+        <button class="tab-btn" data-tab="date">
+          <span class="tab-ico">&#128197;</span> Data
+        </button>
+        <button class="tab-btn" data-tab="bg">
+          <span class="tab-ico">&#127748;</span> Sfondo
+        </button>
+        <button class="tab-btn" data-tab="fg">
+          <span class="tab-ico">&#128100;</span> Soggetto
         </button>
       </nav>
 
@@ -52,20 +57,31 @@
         <!-- ---- TAB: MEDIA ---- -->
         <div class="panel active" id="panel-media">
           <div class="field-group">
-            <label>Livello 0 &middot; Sfondo</label>
+            <label>Foto</label>
             <div class="upload-row">
-              <button class="upload-btn" id="btnUploadBg">Carica immagine di sfondo</button>
+              <button class="upload-btn" id="btnUploadBg">Carica foto</button>
               <div class="thumb" id="thumbBg"><span>vuoto</span></div>
             </div>
+            <p class="hint-text">La foto caricata diventa lo sfondo e fa anche da sorgente per il ritaglio del soggetto.</p>
           </div>
 
           <div class="field-group">
-            <label>Livello 2 &middot; Soggetto</label>
+            <label>Soggetto in primo piano</label>
             <div class="upload-row">
-              <button class="upload-btn" id="btnUploadFg">Ritaglia soggetto (AI + pennello)</button>
+              <button class="upload-btn" id="btnCutout">Ritaglia soggetto dalla foto</button>
               <div class="thumb checker" id="thumbFg"><span>vuoto</span></div>
             </div>
-            <p class="hint-text">Scegli una foto qualsiasi: il soggetto principale viene isolato in automatico da un modello AI on-device (nessun upload su internet); puoi poi rifinire i bordi con pennello e gomma prima di applicarlo.</p>
+            <div class="cutout-actions-row" style="margin-top:10px;">
+              <button class="upload-btn ghost" id="btnCutoutOther">Usa un'altra foto</button>
+              <button class="upload-btn ghost" id="btnRemoveFg">Rimuovi soggetto</button>
+            </div>
+            <p class="hint-text">Il soggetto viene isolato da un modello AI on-device (nessun upload su internet) e rimesso <b>esattamente dov'era nella foto</b>, ma come livello separato sopra l'orologio.</p>
+          </div>
+
+          <div class="field-group section-title">Esportazione</div>
+          <div class="field-group">
+            <button class="upload-btn ghost" id="exportPngBtn">Esporta come PNG statico</button>
+            <p class="hint-text">Utile per condividere un'anteprima; non sostituisce lo sfondo animato.</p>
           </div>
         </div>
 
@@ -73,102 +89,203 @@
         <div class="panel" id="panel-clock">
 
           <div class="field-group">
+            <label class="checkbox-row">
+              <input type="checkbox" id="clockEnabledCheck" checked />
+              <span>Mostra orologio</span>
+            </label>
+          </div>
+
+          <div class="field-group">
             <label>Contenuto</label>
             <div class="segmented" id="clockModeSeg">
               <button class="seg-btn active" data-mode="time">Ora corrente</button>
-              <button class="seg-btn" data-mode="custom">Testo personalizzato</button>
+              <button class="seg-btn" data-mode="custom">Testo fisso</button>
             </div>
+          </div>
+
+          <div class="field-group" id="clockFormatGroup">
+            <label for="clockFormatSelect">Formato ora</label>
+            <select id="clockFormatSelect">
+              <option value="24" selected>24 ore &middot; 09:05</option>
+              <option value="24short">24 ore senza zero &middot; 9:05</option>
+              <option value="12">12 ore &middot; 9:05</option>
+              <option value="12ampm">12 ore con AM/PM &middot; 9:05 AM</option>
+            </select>
           </div>
 
           <div class="field-group" id="customTextGroup" style="display:none;">
             <label for="customTextInput">Testo</label>
-            <input type="text" id="customTextInput" placeholder="Scrivi qualcosa..." maxlength="40" />
+            <input type="text" id="customTextInput" placeholder="Scrivi qualcosa..." maxlength="60" />
           </div>
 
-          <div class="field-group" id="showDateGroup">
-            <label class="checkbox-row">
-              <input type="checkbox" id="showDateCheck" checked />
-              <span>Mostra data sotto l'ora</span>
-            </label>
-          </div>
-
+          <div class="field-group section-title">Carattere</div>
           <div class="field-group">
-            <label for="fontSelect">Font</label>
-            <select id="fontSelect">
-              <option value="sans" selected>Sans (Helvetica / Segoe)</option>
-              <option value="serif">Serif (Georgia / Times)</option>
-              <option value="monospace">Monospace (Courier)</option>
-              <option value="condensed">Condensed (stile Impact)</option>
-            </select>
-            <p class="hint-text">Nel sfondo animato il font viene reso con il carattere di sistema Android più vicino a quello scelto qui.</p>
+            <label for="clockFontSelect">Font</label>
+            <select id="clockFontSelect"></select>
           </div>
-
           <div class="field-group">
             <label class="checkbox-row">
-              <input type="checkbox" id="boldCheck" checked />
-              <span>Testo in grassetto</span>
+              <input type="checkbox" id="clockBoldCheck" checked />
+              <span>Grassetto</span>
             </label>
           </div>
-
           <div class="field-group">
-            <label>Dimensione <span class="value-badge" id="sizeValue">140</span></label>
-            <input type="range" id="sizeRange" min="40" max="320" value="140" />
+            <label class="checkbox-row">
+              <input type="checkbox" id="clockItalicCheck" />
+              <span>Corsivo</span>
+            </label>
+          </div>
+          <div class="field-group">
+            <label>Dimensione <span class="value-badge" id="clockSizeValue">150</span></label>
+            <input type="range" id="clockSizeRange" min="20" max="420" value="150" />
+          </div>
+          <div class="field-group">
+            <label>Spaziatura lettere <span class="value-badge" id="clockTrackValue">0</span></label>
+            <input type="range" id="clockTrackRange" min="-20" max="80" value="0" />
           </div>
 
+          <div class="field-group section-title">Aspetto</div>
           <div class="field-group">
             <label>Colore</label>
-            <input type="color" id="colorPicker" value="#ffffff" />
+            <input type="color" id="clockColorPicker" value="#ffffff" />
+          </div>
+          <div class="field-group">
+            <label>Opacit&agrave; <span class="value-badge" id="clockOpacityValue">100%</span></label>
+            <input type="range" id="clockOpacityRange" min="0" max="100" value="100" />
+          </div>
+          <div class="field-group">
+            <label class="checkbox-row">
+              <input type="checkbox" id="clockShadowCheck" checked />
+              <span>Ombra sotto il testo</span>
+            </label>
           </div>
 
+          <div class="field-group section-title">Posizione</div>
           <div class="field-group">
-            <label>Opacit&agrave; <span class="value-badge" id="opacityValue">100%</span></label>
-            <input type="range" id="opacityRange" min="0" max="100" value="100" />
+            <label>Orizzontale <span class="value-badge" id="clockXValue">50%</span></label>
+            <input type="range" id="clockXRange" min="0" max="100" value="50" />
           </div>
-
           <div class="field-group">
-            <label>Posizione orizzontale <span class="value-badge" id="posXValue">50%</span></label>
-            <input type="range" id="posXRange" min="0" max="100" value="50" />
-          </div>
-
-          <div class="field-group">
-            <label>Posizione verticale <span class="value-badge" id="posYValue">35%</span></label>
-            <input type="range" id="posYRange" min="0" max="100" value="35" />
+            <label>Verticale <span class="value-badge" id="clockYValue">30%</span></label>
+            <input type="range" id="clockYRange" min="0" max="100" value="30" />
           </div>
 
           <div class="field-group section-title">Deformazione</div>
           <div class="field-group">
-            <label>Stretch verticale <span class="value-badge" id="stretchYValue">100%</span></label>
-            <input type="range" id="stretchYRange" min="50" max="200" value="100" />
-            <p class="hint-text">Allunga l'orologio verso l'alto/basso senza cambiarne la larghezza.</p>
+            <label>Stretch orizzontale <span class="value-badge" id="clockStretchXValue">100%</span></label>
+            <input type="range" id="clockStretchXRange" min="40" max="250" value="100" />
           </div>
           <div class="field-group">
-            <label>Stretch orizzontale <span class="value-badge" id="stretchXValue">100%</span></label>
-            <input type="range" id="stretchXRange" min="50" max="200" value="100" />
-            <p class="hint-text">Allarga l'orologio in larghezza senza cambiarne l'altezza.</p>
+            <label>Stretch verticale <span class="value-badge" id="clockStretchYValue">100%</span></label>
+            <input type="range" id="clockStretchYRange" min="40" max="250" value="100" />
+          </div>
+
+          <div class="field-group">
+            <button class="upload-btn ghost" id="clockResetBtn">Ripristina orologio</button>
           </div>
         </div>
 
-        <!-- ---- TAB: EFFETTI ---- -->
-        <div class="panel" id="panel-fx">
-
-          <div class="field-group">
-            <label>Oscura sfondo <span class="value-badge" id="dimValue">0%</span></label>
-            <input type="range" id="dimRange" min="0" max="100" value="0" />
-            <p class="hint-text">Aumenta il contrasto dell'orologio scurendo leggermente lo sfondo.</p>
-          </div>
+        <!-- ---- TAB: DATA ---- -->
+        <div class="panel" id="panel-date">
 
           <div class="field-group">
             <label class="checkbox-row">
-              <input type="checkbox" id="parallaxCheck" checked />
-              <span>Parallasse al movimento (giroscopio)</span>
+              <input type="checkbox" id="dateEnabledCheck" checked />
+              <span>Mostra data</span>
             </label>
-            <p class="hint-text">Solo nello sfondo animato: inclinando il telefono i livelli si muovono a velocità diverse, rafforzando l'effetto di profondità. Non visibile in questa anteprima.</p>
+            <p class="hint-text">La data &egrave; un livello del tutto indipendente dall'orologio: font, dimensione e posizione non si influenzano a vicenda.</p>
           </div>
 
-          <div class="field-group section-title">Livello 0 &middot; Sfondo</div>
+          <div class="field-group">
+            <label for="dateFormatSelect">Formato</label>
+            <select id="dateFormatSelect">
+              <option value="full" selected>Luned&igrave; 16 settembre</option>
+              <option value="fullYear">Luned&igrave; 16 settembre 2026</option>
+              <option value="dayMonth">16 settembre</option>
+              <option value="short">Lun 16 set</option>
+              <option value="numeric">16/09/2026</option>
+              <option value="weekday">Luned&igrave;</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="checkbox-row">
+              <input type="checkbox" id="dateUppercaseCheck" />
+              <span>Tutto MAIUSCOLO</span>
+            </label>
+          </div>
+
+          <div class="field-group section-title">Carattere</div>
+          <div class="field-group">
+            <label for="dateFontSelect">Font</label>
+            <select id="dateFontSelect"></select>
+          </div>
+          <div class="field-group">
+            <label class="checkbox-row">
+              <input type="checkbox" id="dateBoldCheck" />
+              <span>Grassetto</span>
+            </label>
+          </div>
+          <div class="field-group">
+            <label class="checkbox-row">
+              <input type="checkbox" id="dateItalicCheck" />
+              <span>Corsivo</span>
+            </label>
+          </div>
+          <div class="field-group">
+            <label>Dimensione <span class="value-badge" id="dateSizeValue">38</span></label>
+            <input type="range" id="dateSizeRange" min="12" max="220" value="38" />
+          </div>
+          <div class="field-group">
+            <label>Spaziatura lettere <span class="value-badge" id="dateTrackValue">0</span></label>
+            <input type="range" id="dateTrackRange" min="-10" max="60" value="0" />
+          </div>
+
+          <div class="field-group section-title">Aspetto</div>
+          <div class="field-group">
+            <label>Colore</label>
+            <input type="color" id="dateColorPicker" value="#ffffff" />
+          </div>
+          <div class="field-group">
+            <label>Opacit&agrave; <span class="value-badge" id="dateOpacityValue">100%</span></label>
+            <input type="range" id="dateOpacityRange" min="0" max="100" value="100" />
+          </div>
+          <div class="field-group">
+            <label class="checkbox-row">
+              <input type="checkbox" id="dateShadowCheck" checked />
+              <span>Ombra sotto il testo</span>
+            </label>
+          </div>
+
+          <div class="field-group section-title">Posizione</div>
+          <div class="field-group">
+            <label>Orizzontale <span class="value-badge" id="dateXValue">50%</span></label>
+            <input type="range" id="dateXRange" min="0" max="100" value="50" />
+          </div>
+          <div class="field-group">
+            <label>Verticale <span class="value-badge" id="dateYValue">38%</span></label>
+            <input type="range" id="dateYRange" min="0" max="100" value="38" />
+          </div>
+
+          <div class="field-group section-title">Deformazione</div>
+          <div class="field-group">
+            <label>Stretch orizzontale <span class="value-badge" id="dateStretchXValue">100%</span></label>
+            <input type="range" id="dateStretchXRange" min="40" max="250" value="100" />
+          </div>
+          <div class="field-group">
+            <label>Stretch verticale <span class="value-badge" id="dateStretchYValue">100%</span></label>
+            <input type="range" id="dateStretchYRange" min="40" max="250" value="100" />
+          </div>
+
+          <div class="field-group">
+            <button class="upload-btn ghost" id="dateResetBtn">Ripristina data</button>
+          </div>
+        </div>
+
+        <!-- ---- TAB: SFONDO ---- -->
+        <div class="panel" id="panel-bg">
           <div class="field-group">
             <label>Zoom <span class="value-badge" id="bgScaleValue">100%</span></label>
-            <input type="range" id="bgScaleRange" min="100" max="220" value="100" />
+            <input type="range" id="bgScaleRange" min="100" max="260" value="100" />
           </div>
           <div class="field-group">
             <label>Sposta orizzontalmente <span class="value-badge" id="bgXValue">0</span></label>
@@ -179,19 +296,30 @@
             <input type="range" id="bgYRange" min="-100" max="100" value="0" />
           </div>
           <div class="field-group">
-            <label>Ruota <span class="value-badge" id="bgRotationValue">0°</span></label>
+            <label>Ruota <span class="value-badge" id="bgRotationValue">0&deg;</span></label>
             <input type="range" id="bgRotationRange" min="-180" max="180" value="0" />
             <div class="cutout-actions-row">
               <button class="upload-btn ghost" id="bgRotateLeftBtn">&#8634; 90&deg;</button>
               <button class="upload-btn ghost" id="bgRotateRightBtn">&#8635; 90&deg;</button>
             </div>
-            <p class="hint-text">Usa i pulsanti per raddrizzare velocemente una foto orizzontale/verticale, poi rifinisci con lo slider.</p>
           </div>
-
-          <div class="field-group section-title">Livello 2 &middot; Soggetto</div>
           <div class="field-group">
-            <label>Scala <span class="value-badge" id="fgScaleValue">100%</span></label>
-            <input type="range" id="fgScaleRange" min="40" max="220" value="100" />
+            <label>Oscura <span class="value-badge" id="dimValue">0%</span></label>
+            <input type="range" id="dimRange" min="0" max="100" value="0" />
+            <p class="hint-text">Scurisce lo sfondo per far risaltare orologio e data. Il soggetto in primo piano resta luminoso.</p>
+          </div>
+          <div class="field-group">
+            <button class="upload-btn ghost" id="bgResetBtn">Ripristina sfondo</button>
+          </div>
+          <p class="hint-text">Zoom, spostamenti e rotazione dello sfondo trascinano con s&eacute; anche il soggetto, cos&igrave; l'effetto di profondit&agrave; resta perfettamente allineato.</p>
+        </div>
+
+        <!-- ---- TAB: SOGGETTO ---- -->
+        <div class="panel" id="panel-fg">
+          <p class="hint-text" style="margin-top:0;">Di default il soggetto sta esattamente dov'era nella foto. Usa questi comandi solo se vuoi spostarlo apposta.</p>
+          <div class="field-group">
+            <label>Zoom <span class="value-badge" id="fgScaleValue">100%</span></label>
+            <input type="range" id="fgScaleRange" min="50" max="200" value="100" />
           </div>
           <div class="field-group">
             <label>Sposta orizzontalmente <span class="value-badge" id="fgXValue">0</span></label>
@@ -202,22 +330,7 @@
             <input type="range" id="fgYRange" min="-100" max="100" value="0" />
           </div>
           <div class="field-group">
-            <label>Ruota <span class="value-badge" id="fgRotationValue">0°</span></label>
-            <input type="range" id="fgRotationRange" min="-180" max="180" value="0" />
-            <div class="cutout-actions-row">
-              <button class="upload-btn ghost" id="fgRotateLeftBtn">&#8634; 90&deg;</button>
-              <button class="upload-btn ghost" id="fgRotateRightBtn">&#8635; 90&deg;</button>
-            </div>
-          </div>
-
-          <div class="field-group">
-            <button class="upload-btn ghost" id="btnResetFx">Ripristina regolazioni</button>
-          </div>
-
-          <div class="field-group section-title">Esportazione</div>
-          <div class="field-group">
-            <button class="upload-btn ghost" id="exportPngBtn">Esporta anche come PNG statico</button>
-            <p class="hint-text">Utile per condividere un'anteprima; non sostituisce lo sfondo animato.</p>
+            <button class="upload-btn ghost" id="fgResetBtn">Rimetti nella posizione originale</button>
           </div>
         </div>
 
@@ -258,7 +371,7 @@
       <button id="cutoutResetBtn" class="upload-btn ghost">Ricomincia da AI</button>
       <button id="cutoutClearBtn" class="upload-btn ghost">Svuota tutto</button>
     </div>
-    <p class="hint-text center">Pennello = ripristina il soggetto &middot; Gomma = rimuovi lo sfondo residuo. Tocca e trascina sull'anteprima.</p>
+    <p class="hint-text center">Pennello = ripristina il soggetto &middot; Gomma = rimuovi lo sfondo residuo. Il ritaglio conserva l'inquadratura originale: non dovrai riposizionarlo.</p>
   </div>
 </div>
 

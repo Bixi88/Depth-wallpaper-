@@ -4,19 +4,28 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import java.util.Date
 import java.util.Locale
 
 /**
- * Motore di rendering condiviso dal Live Wallpaper. E' il porting nativo, 1:1, della
- * funzione render() dell'editor in assets/js/app.js: stesso ordine dei layer,
- * stessa matematica di posizionamento (cover/contain), stesso concetto di
- * "l'orologio sta in mezzo, il soggetto trasparente ci passa sopra".
+ * Porting nativo 1:1 del render() dell'editor (assets/js/app.js).
  *
- * La risoluzione di riferimento usata in editor per la dimensione del font è 1080px
- * di larghezza: qui la scaliamo in proporzione alla larghezza reale dello schermo.
+ * Ordine dei livelli:
+ *   0) sfondo          (foto intera, "cover")
+ *   0b) velo scuro     (opzionale)
+ *   1) orologio        (livello di testo indipendente)
+ *   1b) data           (livello di testo indipendente)
+ *   2) soggetto        (PNG a piena inquadratura con sfondo trasparente) -> copre l'orologio
+ *
+ * IMPORTANTE: il soggetto viene disegnato con ESATTAMENTE la stessa geometria dello
+ * sfondo (stessa scala "cover", stesso centro, stessa rotazione). Poiche' il PNG del
+ * ritaglio conserva l'inquadratura completa della foto originale, il soggetto ricade
+ * pixel-per-pixel dove si trovava nella foto, senza doverlo riposizionare a mano.
+ * fgScale/fgOffX/fgOffY sono scostamenti FACOLTATIVI rispetto a quella posizione.
  */
 object DepthRenderer {
 
@@ -28,46 +37,50 @@ object DepthRenderer {
         height: Int,
         config: WallpaperConfig,
         bg: Bitmap?,
-        fg: Bitmap?,
-        parallaxX: Float = 0f, // -1..1
-        parallaxY: Float = 0f  // -1..1
+        fg: Bitmap?
     ) {
         val w = width.toFloat()
         val h = height.toFloat()
+        val k = w / EDITOR_REFERENCE_WIDTH
 
         canvas.drawColor(Color.BLACK)
 
-        // ---- Livello 0: sfondo (parallasse minimo: si muove poco, e' lo sfondo) ----
+        // ---- Livello 0: sfondo ----
         if (bg != null) {
-            canvas.save()
-            canvas.translate(parallaxX * w * 0.012f, parallaxY * h * 0.012f)
             drawCover(canvas, bg, w, h, config.bgScale, config.bgOffX, config.bgOffY, config.bgRotation)
-            canvas.restore()
         }
 
         if (config.bgDim > 0f) {
             val paint = Paint()
-            paint.color = Color.argb((config.bgDim / 100f * 0.65f * 255f).toInt(), 0, 0, 0)
+            paint.color = Color.argb((config.bgDim / 100f * 0.75f * 255f).toInt(), 0, 0, 0)
             canvas.drawRect(0f, 0f, w, h, paint)
         }
 
-        // ---- Livello 1: orologio (parallasse intermedio) ----
-        canvas.save()
-        canvas.translate(parallaxX * w * 0.03f, parallaxY * h * 0.03f)
-        drawClock(canvas, w, h, config.clock)
-        canvas.restore()
+        // ---- Livello 1: orologio ----
+        if (config.clock.enabled) {
+            val text = clockText(config.clock)
+            drawTextLayer(canvas, w, h, k, config.clock.style, text, multiline = config.clock.mode == "custom")
+        }
 
-        // ---- Livello 2: soggetto ritagliato, sopra l'orologio (parallasse maggiore -> sembra piu' vicino) ----
+        // ---- Livello 1b: data ----
+        if (config.date.enabled) {
+            drawTextLayer(canvas, w, h, k, config.date.style, dateText(config.date), multiline = false)
+        }
+
+        // ---- Livello 2: soggetto ritagliato, sopra l'orologio ----
         if (fg != null) {
-            canvas.save()
-            canvas.translate(parallaxX * w * 0.05f, parallaxY * h * 0.05f)
-            drawSubjectContain(canvas, fg, w, h, config.fgScale, config.fgOffX, config.fgOffY, config.fgRotation)
-            canvas.restore()
+            drawCover(
+                canvas, fg, w, h,
+                config.bgScale * config.fgScale,
+                config.bgOffX + config.fgOffX,
+                config.bgOffY + config.fgOffY,
+                config.bgRotation
+            )
         }
     }
 
     // -------------------------------------------------------------------------------
-    // Layer sfondo: comportamento "cover" (riempie tutto il rettangolo, come CSS background-size:cover)
+    // Immagini: geometria "cover" condivisa da sfondo e soggetto
     // -------------------------------------------------------------------------------
     private fun drawCover(
         canvas: Canvas,
@@ -79,160 +92,180 @@ object DepthRenderer {
         offYFrac: Float,
         rotationDeg: Float
     ) {
-        val imgRatio = bmp.width.toFloat() / bmp.height.toFloat()
-        val rectRatio = rectW / rectH
+        if (bmp.width <= 0 || bmp.height <= 0) return
+        val base = maxOf(rectW / bmp.width.toFloat(), rectH / bmp.height.toFloat())
+        val s = base * (if (scale <= 0f) 1f else scale)
+        val drawW = bmp.width * s
+        val drawH = bmp.height * s
 
-        val drawW: Float
-        val drawH: Float
-        if (imgRatio > rectRatio) {
-            drawH = rectH * scale
-            drawW = drawH * imgRatio
-        } else {
-            drawW = rectW * scale
-            drawH = drawW / imgRatio
-        }
-
-        val maxOffX = kotlin.math.abs(drawW - rectW) / 2f + rectW * 0.5f
-        val maxOffY = kotlin.math.abs(drawH - rectH) / 2f + rectH * 0.5f
-
-        val cx = rectW / 2f + offXFrac * maxOffX * 0.5f
-        val cy = rectH / 2f + offYFrac * maxOffY * 0.5f
+        val cx = rectW / 2f + offXFrac * rectW * 0.5f
+        val cy = rectH / 2f + offYFrac * rectH * 0.5f
 
         canvas.save()
         canvas.translate(cx, cy)
-        canvas.rotate(rotationDeg)
-        val dst = android.graphics.RectF(-drawW / 2f, -drawH / 2f, drawW / 2f, drawH / 2f)
-        canvas.drawBitmap(bmp, null, dst, null)
+        if (rotationDeg != 0f) canvas.rotate(rotationDeg)
+        val dst = RectF(-drawW / 2f, -drawH / 2f, drawW / 2f, drawH / 2f)
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+        canvas.drawBitmap(bmp, null, dst, paint)
         canvas.restore()
     }
 
     // -------------------------------------------------------------------------------
-    // Layer soggetto: comportamento "contain", ancorato verso il basso (figura intera)
+    // Testo (orologio / data)
     // -------------------------------------------------------------------------------
-    private fun drawSubjectContain(
+    private fun typefaceFor(fontKey: String, bold: Boolean, italic: Boolean): Typeface {
+        val family = when (fontKey) {
+            "sans" -> "sans-serif"
+            "sansLight" -> "sans-serif-light"
+            "sansMedium" -> "sans-serif-medium"
+            "sansBlack" -> "sans-serif-black"
+            "sansThin" -> "sans-serif-thin"
+            "condensed" -> "sans-serif-condensed"
+            "condensedLight" -> "sans-serif-condensed-light"
+            "smallcaps" -> "sans-serif-smallcaps"
+            "serif" -> "serif"
+            "monospace" -> "monospace"
+            "cursive" -> "cursive"
+            else -> "sans-serif"
+        }
+        val style = when {
+            bold && italic -> Typeface.BOLD_ITALIC
+            bold -> Typeface.BOLD
+            italic -> Typeface.ITALIC
+            else -> Typeface.NORMAL
+        }
+        return Typeface.create(family, style)
+    }
+
+    private fun drawTextLayer(
         canvas: Canvas,
-        bmp: Bitmap,
-        rectW: Float,
-        rectH: Float,
-        scale: Float,
-        offXFrac: Float,
-        offYFrac: Float,
-        rotationDeg: Float
+        w: Float,
+        h: Float,
+        k: Float,
+        style: TextLayerConfig,
+        text: String,
+        multiline: Boolean
     ) {
-        val imgRatio = bmp.width.toFloat() / bmp.height.toFloat()
-        var drawW = rectW * scale
-        var drawH = drawW / imgRatio
+        if (text.isEmpty()) return
+        val sizePx = style.size * k
+        if (sizePx <= 0f) return
 
-        if (drawH > rectH * scale * 1.4f) {
-            drawH = rectH * scale * 1.4f
-            drawW = drawH * imgRatio
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
+        paint.typeface = typefaceFor(style.fontKey, style.bold, style.italic)
+        paint.textSize = sizePx
+        paint.color = try { Color.parseColor(style.color) } catch (e: Exception) { Color.WHITE }
+        paint.alpha = (style.opacity.coerceIn(0f, 1f) * 255).toInt()
+        if (style.shadow) {
+            paint.setShadowLayer(sizePx * 0.10f, 0f, sizePx * 0.03f, Color.argb(110, 0, 0, 0))
         }
 
-        val cx = rectW / 2f + offXFrac * rectW * 0.4f
-        val baseY = rectH - drawH * 0.42f
-        val cy = baseY + offYFrac * rectH * 0.3f
+        val tracking = style.tracking * k
+        val sx = if (style.stretchX <= 0f) 1f else style.stretchX
+        val sy = if (style.stretchY <= 0f) 1f else style.stretchY
 
         canvas.save()
-        canvas.translate(cx, cy)
-        canvas.rotate(rotationDeg)
-        val dst = android.graphics.RectF(-drawW / 2f, -drawH / 2f, drawW / 2f, drawH / 2f)
-        canvas.drawBitmap(bmp, null, dst, null)
-        canvas.restore()
-    }
+        canvas.translate(style.x * w, style.y * h)
+        canvas.scale(sx, sy)
 
-    // -------------------------------------------------------------------------------
-    // Layer orologio
-    // -------------------------------------------------------------------------------
-    private fun typefaceFor(fontKey: String, bold: Boolean): Typeface {
-        val base = when (fontKey) {
-            "serif" -> Typeface.SERIF
-            "monospace" -> Typeface.MONOSPACE
-            "condensed" -> Typeface.create("sans-serif-condensed", Typeface.NORMAL)
-            else -> Typeface.SANS_SERIF
-        }
-        val style = if (bold) Typeface.BOLD else Typeface.NORMAL
-        return Typeface.create(base, style)
-    }
-
-    private fun drawClock(canvas: Canvas, w: Float, h: Float, clock: ClockConfig) {
-        val scaleFactor = w / EDITOR_REFERENCE_WIDTH
-        val sizePx = clock.size * scaleFactor
-
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        paint.typeface = typefaceFor(clock.fontKey, clock.bold)
-        paint.textAlign = Paint.Align.CENTER
-        paint.color = try { Color.parseColor(clock.color) } catch (e: Exception) { Color.WHITE }
-        paint.alpha = (clock.opacity.coerceIn(0f, 1f) * 255).toInt()
-        paint.setShadowLayer(sizePx * 0.06f, 0f, sizePx * 0.02f, Color.argb(90, 0, 0, 0))
-
-        val x = clock.x * w
-        val y = clock.y * h
-
-        // Stretch non uniforme (verticale/orizzontale indipendenti): trasliamo l'origine
-        // nel punto dell'orologio e scaliamo solo gli assi richiesti, cosi' la dimensione
-        // "size" resta il riferimento e lo stretch la deforma in una sola direzione.
-        canvas.save()
-        canvas.translate(x, y)
-        canvas.scale(clock.stretchX, clock.stretchY)
-
-        if (clock.mode == "time") {
-            val time = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Calendar.getInstance().time)
-            paint.textSize = sizePx
-            drawCenteredBaseline(canvas, paint, time, 0f, 0f)
-
-            if (clock.showDate) {
-                val dateStr = SimpleDateFormat("EEEE d MMMM", Locale.ITALIAN)
-                    .format(Calendar.getInstance().time)
-                    .replaceFirstChar { c -> c.titlecase(Locale.ITALIAN) }
-                paint.textSize = sizePx * 0.22f
-                drawCenteredBaseline(canvas, paint, dateStr, 0f, sizePx * 0.62f)
+        if (multiline) {
+            val maxWidth = (w * 0.92f) / sx
+            val lines = wrapLines(paint, text, maxWidth, tracking)
+            val lineHeight = sizePx * 1.12f
+            var lineY = -(lines.size - 1) * lineHeight / 2f
+            for (line in lines) {
+                drawTracked(canvas, paint, line, lineY, tracking)
+                lineY += lineHeight
             }
         } else {
-            val text = clock.customText.ifBlank { "Il tuo testo" }
-            paint.textSize = sizePx
-            wrapAndDrawText(canvas, paint, text, 0f, 0f, (w * 0.86f) / clock.stretchX, sizePx * 1.05f)
+            drawTracked(canvas, paint, text, 0f, tracking)
         }
 
         canvas.restore()
     }
 
-    /** Paint.drawText usa la baseline: questo helper centra verticalmente come fa il canvas HTML5 (textBaseline = middle). */
-    private fun drawCenteredBaseline(canvas: Canvas, paint: Paint, text: String, x: Float, y: Float) {
+    /** Disegna il testo centrato in (0, y), con spaziatura personalizzata tra le lettere. */
+    private fun drawTracked(canvas: Canvas, paint: Paint, text: String, y: Float, tracking: Float) {
         val metrics = paint.fontMetrics
         val baselineY = y - (metrics.ascent + metrics.descent) / 2f
-        canvas.drawText(text, x, baselineY, paint)
+
+        if (tracking == 0f) {
+            paint.textAlign = Paint.Align.CENTER
+            canvas.drawText(text, 0f, baselineY, paint)
+            return
+        }
+
+        paint.textAlign = Paint.Align.LEFT
+        val total = measureTracked(paint, text, tracking)
+        var x = -total / 2f
+        for (ch in text) {
+            val s = ch.toString()
+            canvas.drawText(s, x, baselineY, paint)
+            x += paint.measureText(s) + tracking
+        }
     }
 
-    private fun wrapAndDrawText(
-        canvas: Canvas,
-        paint: Paint,
-        text: String,
-        cx: Float,
-        cy: Float,
-        maxWidth: Float,
-        lineHeight: Float
-    ) {
-        val words = text.split(" ")
-        val lines = mutableListOf<String>()
-        var current = ""
-        for (word in words) {
-            val test = if (current.isEmpty()) word else "$current $word"
-            if (paint.measureText(test) > maxWidth && current.isNotEmpty()) {
-                lines.add(current)
-                current = word
-            } else {
-                current = test
-            }
-        }
-        if (current.isNotEmpty()) lines.add(current)
+    private fun measureTracked(paint: Paint, text: String, tracking: Float): Float {
+        if (text.isEmpty()) return 0f
+        var total = 0f
+        for (ch in text) total += paint.measureText(ch.toString())
+        return total + tracking * (text.length - 1)
+    }
 
-        val totalH = lines.size * lineHeight
-        var startY = cy - totalH / 2f + lineHeight / 2f
-        val metrics = paint.fontMetrics
-        for (line in lines) {
-            val baselineY = startY - (metrics.ascent + metrics.descent) / 2f
-            canvas.drawText(line, cx, baselineY, paint)
-            startY += lineHeight
+    private fun wrapLines(paint: Paint, text: String, maxWidth: Float, tracking: Float): List<String> {
+        val result = mutableListOf<String>()
+        for (rawLine in text.split("\n")) {
+            val words = rawLine.split(" ")
+            var current = ""
+            for (word in words) {
+                val test = if (current.isEmpty()) word else "$current $word"
+                if (measureTracked(paint, test, tracking) > maxWidth && current.isNotEmpty()) {
+                    result.add(current)
+                    current = word
+                } else {
+                    current = test
+                }
+            }
+            result.add(current)
         }
+        return result
+    }
+
+    // -------------------------------------------------------------------------------
+    // Contenuti dinamici
+    // -------------------------------------------------------------------------------
+    private fun clockText(clock: ClockConfig): String {
+        if (clock.mode == "custom") {
+            return clock.customText.ifBlank { "Il tuo testo" }
+        }
+        val pattern = when (clock.format) {
+            "24short" -> "H:mm"
+            "12" -> "h:mm"
+            "12ampm" -> "h:mm a"
+            else -> "HH:mm"
+        }
+        return try {
+            SimpleDateFormat(pattern, Locale.getDefault()).format(Date())
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    private fun dateText(date: DateConfig): String {
+        val pattern = when (date.format) {
+            "fullYear" -> "EEEE d MMMM yyyy"
+            "dayMonth" -> "d MMMM"
+            "short" -> "EEE d MMM"
+            "numeric" -> "dd/MM/yyyy"
+            "weekday" -> "EEEE"
+            else -> "EEEE d MMMM"
+        }
+        val locale = Locale.getDefault()
+        val text = try {
+            SimpleDateFormat(pattern, locale).format(Calendar.getInstance().time)
+        } catch (e: Exception) {
+            ""
+        }
+        return if (date.uppercase) text.uppercase(locale)
+        else text.replaceFirstChar { c -> c.titlecase(locale) }
     }
 }
