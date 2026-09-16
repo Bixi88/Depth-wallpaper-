@@ -57,6 +57,8 @@ class DepthWallpaperService : WallpaperService() {
 
         override fun onCreate(surfaceHolder: SurfaceHolder) {
             super.onCreate(surfaceHolder)
+            // Rende disponibili al renderer i font inclusi in assets/fonts.
+            DepthRenderer.attach(applicationContext)
             try {
                 reloadConfigAndBitmaps()
                 ContextCompat.registerReceiver(

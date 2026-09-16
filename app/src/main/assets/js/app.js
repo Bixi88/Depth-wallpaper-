@@ -9,22 +9,61 @@
 
   const FONTS = [
     { key: "sans", label: "Sans (Roboto)", css: "sans-serif" },
-    { key: "sansLight", label: "Sans Light", css: "sans-serif-light, sans-serif" },
-    { key: "sansMedium", label: "Sans Medium", css: "sans-serif-medium, sans-serif" },
-    { key: "sansBlack", label: "Sans Black", css: "sans-serif-black, sans-serif" },
-    { key: "sansThin", label: "Sans Thin", css: "sans-serif-thin, sans-serif" },
-    { key: "condensed", label: "Condensed", css: "sans-serif-condensed, 'Arial Narrow', sans-serif" },
     { key: "condensedLight", label: "Condensed Light", css: "sans-serif-condensed-light, sans-serif-condensed, sans-serif" },
     { key: "smallcaps", label: "Maiuscoletto", css: "sans-serif-smallcaps, sans-serif" },
     { key: "serif", label: "Serif", css: "serif" },
     { key: "monospace", label: "Monospace", css: "monospace" },
     { key: "cursive", label: "Corsivo decorativo", css: "cursive" },
+    // --- font inclusi nell'app (assets/fonts), identici nel renderer nativo ---
+    { key: "bebas", label: "Bebas Neue", css: "'Bebas Neue', sans-serif", bundled: true },
+    { key: "anton", label: "Anton", css: "'Anton', sans-serif", bundled: true },
+    { key: "fjalla", label: "Fjalla One", css: "'Fjalla One', sans-serif", bundled: true },
+    { key: "staatliches", label: "Staatliches", css: "'Staatliches', sans-serif", bundled: true },
+    { key: "wireOne", label: "Wire One", css: "'Wire One', sans-serif", bundled: true },
+    { key: "oswald", label: "Oswald", css: "'Oswald', sans-serif", bundled: true },
+    { key: "oswaldLight", label: "Oswald Light", css: "'Oswald Light', sans-serif", bundled: true },
+    { key: "bigShoulders", label: "Big Shoulders", css: "'Big Shoulders', sans-serif", bundled: true },
+    { key: "bigShouldersBlack", label: "Big Shoulders Black", css: "'Big Shoulders Black', sans-serif", bundled: true },
   ];
 
+  /**
+   * Chiavi rimosse dall'elenco (varianti Sans e Condensed): le configurazioni
+   * gia' salvate vengono ricondotte al font rimasto piu' vicino.
+   */
+  const FONT_ALIASES = {
+    sansLight: "sans",
+    sansMedium: "sans",
+    sansBlack: "sans",
+    sansThin: "sans",
+    condensed: "condensedLight",
+  };
+
+  function normalizeFontKey(key) {
+    if (FONT_ALIASES[key]) return FONT_ALIASES[key];
+    return FONTS.some((f) => f.key === key) ? key : "sans";
+  }
+
   function fontCss(key) {
-    const f = FONTS.find((x) => x.key === key);
+    const f = FONTS.find((x) => x.key === normalizeFontKey(key));
     return f ? f.css : "sans-serif";
   }
+
+  /**
+   * I font inclusi nell'app vengono caricati in modo asincrono dalla WebView:
+   * finche' non sono pronti il Canvas disegnerebbe con un ripiego. Li carichiamo
+   * subito e ridisegniamo l'anteprima appena disponibili.
+   */
+  const bundledFontsReady = (function () {
+    if (!document.fonts || !document.fonts.load) return Promise.resolve();
+    const jobs = [];
+    FONTS.filter((f) => f.bundled).forEach((f) => {
+      // Solo la famiglia principale: document.fonts.load vuole un nome, non un elenco.
+      const family = f.css.split(",")[0].trim();
+      jobs.push(document.fonts.load("400 40px " + family));
+      jobs.push(document.fonts.load("700 40px " + family));
+    });
+    return Promise.all(jobs).catch(() => {});
+  })();
 
   function defaultStyle(size, y, bold) {
     return {
@@ -378,19 +417,38 @@
   // ---------------------------------------------------------------------------
   // Gli slider nativi cambiano valore al primo tocco: scorrendo la lista in
   // verticale capitava di modificare per sbaglio i parametri. Qui il valore si
-  // muove SOLO dopo un movimento chiaramente orizzontale (oltre 6px e piu'
-  // orizzontale che verticale) e in modo relativo, quindi un tocco non sposta
-  // nulla e lo scorrimento verticale resta libero. Ogni slider ha un pallino sul
-  // valore di riferimento: toccandolo si torna li', trascinando ci si "aggancia".
+  // muove SOLO dopo un movimento la cui distanza TOTALE (non il singolo campione)
+  // e' chiaramente piu' orizzontale che verticale: un tocco o uno scorrimento
+  // verticale non toccano piu' nulla. Durante il trascinamento, avvicinarsi al
+  // valore centrale ci si "aggancia" (snap magnetico); il pulsante ↺ accanto al
+  // valore riporta al centro in un tocco, in modo affidabile su ogni dispositivo
+  // (a differenza di un indicatore posizionato "a occhio" sopra lo slider nativo,
+  // che su alcune skin Android puo' disallinearsi dal thumb reale).
   // ===========================================================================
   const sliders = {};
   const MAGNET = 0.025; // 2,5% della corsa
+  const THUMB_SIZE = 20; // deve combaciare con --thumb-size nel CSS
+
+  /** Riempie la barra tra il valore CENTRALE (di riferimento) e il valore attuale:
+   *  a riposo lo slider e' "vuoto", e si colora nella direzione in cui lo sposti.
+   *  Coerente con lo snap magnetico e col pulsante di reset accanto al valore. */
+  function paintSliderFill(s, v) {
+    const span = s.max - s.min;
+    if (span <= 0) return;
+    const pThumb = ((v - s.min) / span) * 100;
+    const pCenter = ((s.center - s.min) / span) * 100;
+    const lo = Math.min(pThumb, pCenter).toFixed(2);
+    const hi = Math.max(pThumb, pCenter).toFixed(2);
+    s.input.style.background =
+      `linear-gradient(to right, var(--bg-3) 0%, var(--bg-3) ${lo}%, var(--accent) ${lo}%, var(--accent) ${hi}%, var(--bg-3) ${hi}%, var(--bg-3) 100%)`;
+  }
 
   function applySlider(s, rawValue, doRender) {
     const v = Math.round(Math.max(s.min, Math.min(s.max, rawValue)));
     s.input.value = v;
     if (s.setter) s.setter(v);
     if (s.badge) s.badge.textContent = s.formatter ? s.formatter(v) : String(v);
+    paintSliderFill(s, v);
     if (doRender) renderPreview();
   }
 
@@ -406,19 +464,6 @@
     input.parentNode.insertBefore(row, input);
     row.appendChild(input);
 
-    const dot = document.createElement("button");
-    dot.className = "slider-center";
-    dot.type = "button";
-    dot.title = "Torna al valore centrale";
-    const p = (s.center - s.min) / (s.max - s.min);
-    dot.style.left = `calc(10px + ${p} * (100% - 20px))`;
-    dot.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      applySlider(s, s.center, true);
-    });
-    row.appendChild(dot);
-
     let drag = null;
 
     function pointOf(evt) {
@@ -427,26 +472,37 @@
     }
 
     function onDown(evt) {
-      if (evt.target === dot) return;
       const p = pointOf(evt);
-      drag = { x: p.x, y: p.y, startVal: Number(input.value), active: false };
+      drag = { x: p.x, y: p.y, startVal: Number(input.value), active: false, rejected: false };
     }
 
+    /**
+     * Decide se il gesto e' un trascinamento orizzontale (modifica il valore) o uno
+     * scorrimento verticale della lista (non deve toccare lo slider). La decisione si
+     * basa sulla distanza TOTALE percorsa (non su un singolo campione di movimento):
+     * un solo tocco leggermente obliquo, nei primissimi pixel, non deve piu' "uccidere"
+     * il gesto — si aspetta che il movimento sia abbastanza netto da poter giudicare
+     * con sicurezza la direzione, cosi' lo slider risulta reattivo invece che nervoso.
+     */
     function onMove(evt) {
-      if (!drag) return;
+      if (!drag || drag.rejected) return;
       const p = pointOf(evt);
       const dx = p.x - drag.x;
       const dy = p.y - drag.y;
 
       if (!drag.active) {
-        if (Math.abs(dy) > Math.abs(dx)) { drag = null; return; } // scorrimento verticale
-        if (Math.abs(dx) < 6) return;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 8) return; // troppo presto per capire la direzione: aspetta
+        if (Math.abs(dy) > Math.abs(dx)) {
+          drag.rejected = true; // scorrimento verticale: lascia fare alla pagina
+          return;
+        }
         drag.active = true;
         row.classList.add("dragging");
       }
       if (evt.cancelable) evt.preventDefault();
 
-      const width = Math.max(1, input.getBoundingClientRect().width - 20);
+      const width = Math.max(1, input.getBoundingClientRect().width - THUMB_SIZE);
       const span = s.max - s.min;
       let v = drag.startVal + (dx / width) * span;
       if (Math.abs(v - s.center) <= span * MAGNET) v = s.center;
@@ -454,7 +510,7 @@
     }
 
     function onUp() {
-      if (drag) row.classList.remove("dragging");
+      if (drag && drag.active) row.classList.remove("dragging");
       drag = null;
     }
 
@@ -467,12 +523,37 @@
     window.addEventListener("mouseup", onUp);
   }
 
+  /** Aggiunge, accanto al valore, il pulsante "↺" che riporta lo slider al centro
+   *  di riferimento in un tocco (stile "Studio"). E' l'unico modo per tornare al
+   *  centro: essendo un pulsante normale, e' sempre esattamente dove ci si aspetta,
+   *  a differenza di un indicatore sovrapposto allo slider. */
+  function attachResetIcon(s, badge) {
+    if (!badge || !badge.parentNode) return;
+    const wrap = document.createElement("span");
+    wrap.className = "value-wrap";
+    badge.parentNode.insertBefore(wrap, badge);
+    wrap.appendChild(badge);
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "value-reset-btn";
+    btn.title = "Ripristina";
+    btn.textContent = "\u21BA";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      applySlider(s, s.center, true);
+    });
+    wrap.appendChild(btn);
+  }
+
   function bindRange(rangeId, badgeId, setter, formatter) {
     const input = document.getElementById(rangeId);
     if (!input) return;
+    const badge = badgeId ? document.getElementById(badgeId) : null;
     const s = {
       input: input,
-      badge: badgeId ? document.getElementById(badgeId) : null,
+      badge: badge,
       setter: setter,
       formatter: formatter,
       min: Number(input.min),
@@ -481,6 +562,7 @@
     };
     sliders[rangeId] = s;
     buildSliderRow(s);
+    attachResetIcon(s, badge);
     applySlider(s, Number(input.value), false);
   }
 
@@ -505,13 +587,23 @@
   function fillFontSelect(id, selectedKey) {
     const sel = document.getElementById(id);
     sel.innerHTML = "";
-    FONTS.forEach((f) => {
-      const opt = document.createElement("option");
-      opt.value = f.key;
-      opt.textContent = f.label;
-      opt.style.fontFamily = f.css;
-      if (f.key === selectedKey) opt.selected = true;
-      sel.appendChild(opt);
+    const groups = [
+      { label: "Font di sistema", items: FONTS.filter((f) => !f.bundled) },
+      { label: "Font inclusi nell'app", items: FONTS.filter((f) => f.bundled) },
+    ];
+    groups.forEach((g) => {
+      if (!g.items.length) return;
+      const grp = document.createElement("optgroup");
+      grp.label = g.label;
+      g.items.forEach((f) => {
+        const opt = document.createElement("option");
+        opt.value = f.key;
+        opt.textContent = f.label;
+        opt.style.fontFamily = f.css;
+        if (f.key === selectedKey) opt.selected = true;
+        grp.appendChild(opt);
+      });
+      sel.appendChild(grp);
     });
   }
 
@@ -929,6 +1021,46 @@
     showToast("Soggetto riportato nella posizione originale");
   });
 
+  // ===========================================================================
+  // RESET TUTTO (icona nell'header) — doppio tocco di conferma
+  // ===========================================================================
+  let resetAllArmed = false;
+  let resetAllTimer = null;
+  document.getElementById("resetAllBtn").addEventListener("click", () => {
+    if (!resetAllArmed) {
+      resetAllArmed = true;
+      showToast("Tocca di nuovo per ripristinare tutto");
+      clearTimeout(resetAllTimer);
+      resetAllTimer = setTimeout(() => { resetAllArmed = false; }, 3000);
+      return;
+    }
+    resetAllArmed = false;
+    clearTimeout(resetAllTimer);
+
+    state.clock = { enabled: true, mode: "time", customText: "", format: "24", style: defaultStyle(150, 0.30, true) };
+    state.date = { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.38, false) };
+    state.bgDim = 0;
+    state.linkFgToBg = false;
+    state.bg.scale = 1; state.bg.offX = 0; state.bg.offY = 0; state.bg.rotation = 0;
+    clearSubject();
+
+    document.getElementById("clockEnabledCheck").checked = true;
+    document.getElementById("clockFormatSelect").value = "24";
+    document.getElementById("customTextInput").value = "";
+    document.querySelectorAll("#clockModeSeg .seg-btn").forEach((b) => b.classList.toggle("active", b.dataset.mode === "time"));
+    syncClockMode();
+    document.getElementById("dateEnabledCheck").checked = true;
+    document.getElementById("dateFormatSelect").value = "full";
+    document.getElementById("dateUppercaseCheck").checked = false;
+    document.getElementById("linkFgCheck").checked = false;
+
+    syncTextLayerUi("clock", state.clock);
+    syncTextLayerUi("date", state.date);
+    syncImageUi();
+    renderPreview();
+    showToast("Tutto ripristinato");
+  });
+
   function syncImageUi() {
     setSlider("bgScaleRange", scaleToSlider(state.bg.scale));
     setSlider("bgXRange", Math.round(state.bg.offX * 100));
@@ -1094,12 +1226,14 @@
         state.clock.customText = cfg.clock.customText || "";
         state.clock.format = cfg.clock.format || "24";
         if (cfg.clock.style) Object.assign(state.clock.style, cfg.clock.style);
+        state.clock.style.fontKey = normalizeFontKey(state.clock.style.fontKey);
       }
       if (cfg.date) {
         state.date.enabled = cfg.date.enabled !== false;
         state.date.format = cfg.date.format || "full";
         state.date.uppercase = !!cfg.date.uppercase;
         if (cfg.date.style) Object.assign(state.date.style, cfg.date.style);
+        state.date.style.fontKey = normalizeFontKey(state.date.style.fontKey);
       }
       state.bgDim = Number(cfg.bgDim) || 0;
       state.bg.scale = Number(cfg.bgScale) || 1;
@@ -1161,6 +1295,9 @@
   syncTextLayerUi("date", state.date);
   syncImageUi();
   renderPreview();
+
+  // I font inclusi arrivano dopo il primo frame: ridisegna appena sono pronti.
+  bundledFontsReady.then(() => { renderPreview(); });
 
   if (isNative && typeof Android.requestSavedState === "function") {
     try { Android.requestSavedState(); } catch (e) { /* ignora */ }

@@ -1,5 +1,7 @@
 package com.depthwallpaper.creator
 
+import android.content.Context
+import android.content.res.AssetManager
 import android.graphics.BlurMaskFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -108,14 +110,68 @@ object DepthRenderer {
     // -------------------------------------------------------------------------------
     // Testo
     // -------------------------------------------------------------------------------
+    /**
+     * Font inclusi in assets/fonts: le chiavi devono restare identiche a quelle
+     * dell'editor (FONTS in assets/js/app.js). Per ogni famiglia il file "bold"
+     * e' opzionale: se manca, il grassetto viene sintetizzato da Android.
+     */
+    private val BUNDLED_FONTS: Map<String, Pair<String, String?>> = mapOf(
+        "bebas" to Pair("fonts/BebasNeue-Regular.ttf", null),
+        "anton" to Pair("fonts/Anton-Regular.ttf", null),
+        "fjalla" to Pair("fonts/FjallaOne-Regular.ttf", null),
+        "staatliches" to Pair("fonts/Staatliches-Regular.ttf", null),
+        "wireOne" to Pair("fonts/WireOne-Regular.ttf", null),
+        "oswald" to Pair("fonts/Oswald-Regular.ttf", "fonts/Oswald-Bold.ttf"),
+        "oswaldLight" to Pair("fonts/Oswald-Light.ttf", null),
+        "bigShoulders" to Pair("fonts/BigShoulders-Regular.ttf", "fonts/BigShoulders-Bold.ttf"),
+        "bigShouldersBlack" to Pair("fonts/BigShoulders-Black.ttf", null)
+    )
+
+    private var assetManager: AssetManager? = null
+    private val typefaceCache = HashMap<String, Typeface>()
+
+    /**
+     * Va chiamato una volta prima del primo render (vedi DepthWallpaperService):
+     * senza AssetManager i font inclusi ricadono sul sans-serif di sistema.
+     */
+    fun attach(context: Context) {
+        if (assetManager == null) assetManager = context.applicationContext.assets
+    }
+
+    private fun bundledTypeface(path: String): Typeface? {
+        typefaceCache[path]?.let { return it }
+        val am = assetManager ?: return null
+        return try {
+            val tf = Typeface.createFromAsset(am, path)
+            typefaceCache[path] = tf
+            tf
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
     private fun typefaceFor(fontKey: String, bold: Boolean, italic: Boolean): Typeface {
+        val bundled = BUNDLED_FONTS[fontKey]
+        if (bundled != null) {
+            val path = if (bold && bundled.second != null) bundled.second!! else bundled.first
+            val loaded = bundledTypeface(path)
+            if (loaded != null) {
+                // Se la famiglia ha gia' il file bold non serve il grassetto sintetico.
+                val needsFakeBold = bold && bundled.second == null
+                val style = when {
+                    needsFakeBold && italic -> Typeface.BOLD_ITALIC
+                    needsFakeBold -> Typeface.BOLD
+                    italic -> Typeface.ITALIC
+                    else -> Typeface.NORMAL
+                }
+                return if (style == Typeface.NORMAL) loaded else Typeface.create(loaded, style)
+            }
+        }
+
+        // Le varianti Sans e "condensed" non sono piu' offerte dall'editor: le
+        // configurazioni salvate in precedenza ricadono sul font rimasto piu' vicino.
         val family = when (fontKey) {
-            "sansLight" -> "sans-serif-light"
-            "sansMedium" -> "sans-serif-medium"
-            "sansBlack" -> "sans-serif-black"
-            "sansThin" -> "sans-serif-thin"
-            "condensed" -> "sans-serif-condensed"
-            "condensedLight" -> "sans-serif-condensed-light"
+            "condensedLight", "condensed" -> "sans-serif-condensed-light"
             "smallcaps" -> "sans-serif-smallcaps"
             "serif" -> "serif"
             "monospace" -> "monospace"
