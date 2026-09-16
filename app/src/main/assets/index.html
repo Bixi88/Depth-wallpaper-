@@ -160,7 +160,7 @@
           </div>
           <div class="field-group">
             <label>Dimensione <span class="value-badge" id="clockSizeValue">150</span></label>
-            <input type="range" id="clockSizeRange" min="20" max="420" value="150" data-center="150" />
+            <input type="range" id="clockSizeRange" min="20" max="700" value="150" data-center="150" />
           </div>
           <div class="field-group">
             <label>Spaziatura lettere <span class="value-badge" id="clockTrackValue">0</span></label>
@@ -170,7 +170,13 @@
           <div class="field-group section-title">Colore</div>
           <div class="field-group">
             <label>Colore testo</label>
-            <input type="color" id="clockColorPicker" value="#ffffff" />
+            <div class="color-row">
+              <button type="button" class="color-swatch-btn" id="clockColorPicker" data-value="#ffffff"></button>
+              <button type="button" class="color-swatch-btn hidden" id="clockColor2Picker" data-value="#ffc531"></button>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="checkbox-row"><input type="checkbox" id="clockGradientCheck" /><span>Sfumato (2 colori)</span></label>
           </div>
           <div class="field-group">
             <label>Opacit&agrave; <span class="value-badge" id="clockOpacityValue">100%</span></label>
@@ -185,7 +191,7 @@
           </div>
           <div class="field-group">
             <label>Colore contorno</label>
-            <input type="color" id="clockOutlineColor" value="#000000" />
+            <button type="button" class="color-swatch-btn" id="clockOutlineColor" data-value="#000000"></button>
           </div>
           <div class="field-group">
             <label>Alone morbido <span class="value-badge" id="clockGlowValue">0</span></label>
@@ -193,7 +199,7 @@
           </div>
           <div class="field-group">
             <label>Colore alone</label>
-            <input type="color" id="clockGlowColor" value="#000000" />
+            <button type="button" class="color-swatch-btn" id="clockGlowColor" data-value="#000000"></button>
           </div>
           <div class="field-group">
             <label>Ombra &middot; intensit&agrave; <span class="value-badge" id="clockShadowValue">45%</span></label>
@@ -213,7 +219,7 @@
           </div>
           <div class="field-group">
             <label>Colore pannello</label>
-            <input type="color" id="clockPlateColor" value="#000000" />
+            <button type="button" class="color-swatch-btn" id="clockPlateColor" data-value="#000000"></button>
           </div>
 
           <div class="field-group section-title">Posizione</div>
@@ -291,7 +297,13 @@
           <div class="field-group section-title">Colore</div>
           <div class="field-group">
             <label>Colore testo</label>
-            <input type="color" id="dateColorPicker" value="#ffffff" />
+            <div class="color-row">
+              <button type="button" class="color-swatch-btn" id="dateColorPicker" data-value="#ffffff"></button>
+              <button type="button" class="color-swatch-btn hidden" id="dateColor2Picker" data-value="#ffc531"></button>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="checkbox-row"><input type="checkbox" id="dateGradientCheck" /><span>Sfumato (2 colori)</span></label>
           </div>
           <div class="field-group">
             <label>Opacit&agrave; <span class="value-badge" id="dateOpacityValue">100%</span></label>
@@ -305,7 +317,7 @@
           </div>
           <div class="field-group">
             <label>Colore contorno</label>
-            <input type="color" id="dateOutlineColor" value="#000000" />
+            <button type="button" class="color-swatch-btn" id="dateOutlineColor" data-value="#000000"></button>
           </div>
           <div class="field-group">
             <label>Alone morbido <span class="value-badge" id="dateGlowValue">0</span></label>
@@ -313,7 +325,7 @@
           </div>
           <div class="field-group">
             <label>Colore alone</label>
-            <input type="color" id="dateGlowColor" value="#000000" />
+            <button type="button" class="color-swatch-btn" id="dateGlowColor" data-value="#000000"></button>
           </div>
           <div class="field-group">
             <label>Ombra &middot; intensit&agrave; <span class="value-badge" id="dateShadowValue">45%</span></label>
@@ -333,7 +345,7 @@
           </div>
           <div class="field-group">
             <label>Colore pannello</label>
-            <input type="color" id="datePlateColor" value="#000000" />
+            <button type="button" class="color-swatch-btn" id="datePlateColor" data-value="#000000"></button>
           </div>
 
           <div class="field-group section-title">Posizione</div>

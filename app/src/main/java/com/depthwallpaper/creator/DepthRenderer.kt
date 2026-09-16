@@ -6,8 +6,10 @@ import android.graphics.BlurMaskFilter
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -243,10 +245,14 @@ object DepthRenderer {
 
         var shadowPending = style.shadowOpacity > 0f
 
+        // Larghezza massima tra le righe: serve sia al pannello dietro sia al
+        // gradiente del riempimento (calcolata una sola volta).
+        var maxLineWidth = 0f
+        for (line in lines) maxLineWidth = maxOf(maxLineWidth, measureTracked(base, line, tracking))
+
         // --- pannello dietro al testo ---
         if (style.plateOpacity > 0f) {
-            var maxW = 0f
-            for (line in lines) maxW = maxOf(maxW, measureTracked(base, line, tracking))
+            val maxW = maxLineWidth
             val padX = sizePx * 0.32f
             val padY = sizePx * 0.22f
             val rect = RectF(
@@ -309,6 +315,15 @@ object DepthRenderer {
         fill.style = Paint.Style.FILL
         fill.color = parseColor(style.color, Color.WHITE)
         fill.alpha = (alpha * 255).toInt()
+        if (style.gradient && maxLineWidth > 0f) {
+            val half = maxLineWidth / 2f
+            fill.shader = LinearGradient(
+                -half, 0f, half, 0f,
+                parseColor(style.color, Color.WHITE),
+                parseColor(style.color2, Color.WHITE),
+                Shader.TileMode.CLAMP
+            )
+        }
         if (shadowPending) {
             fill.setShadowLayer(
                 style.shadowBlur * k, 0f, style.shadowOffsetY * k,
@@ -387,11 +402,13 @@ object DepthRenderer {
     // -------------------------------------------------------------------------------
     private fun clockText(clock: ClockConfig): String {
         if (clock.mode == "custom") return clock.customText.ifBlank { "Il tuo testo" }
+        // Niente ":" tra ore e minuti: erano i "puntini centrali" che l'utente
+        // non vuole piu' vedere nell'orologio (deve restare identico all'editor).
         val pattern = when (clock.format) {
-            "24short" -> "H:mm"
-            "12" -> "h:mm"
-            "12ampm" -> "h:mm a"
-            else -> "HH:mm"
+            "24short" -> "H mm"
+            "12" -> "h mm"
+            "12ampm" -> "h mm a"
+            else -> "HH mm"
         }
         return try {
             SimpleDateFormat(pattern, Locale.getDefault()).format(Date())

@@ -13,6 +13,8 @@ data class TextLayerConfig(
     val italic: Boolean,
     val size: Float,        // px alla larghezza di riferimento 1080 dell'editor
     val color: String,      // "#rrggbb"
+    val gradient: Boolean,  // true = riempimento testo sfumato tra color e color2
+    val color2: String,     // "#rrggbb", usato solo se gradient = true
     val opacity: Float,     // 0..1
     val x: Float,           // 0..1
     val y: Float,           // 0..1
@@ -44,6 +46,8 @@ data class TextLayerConfig(
                 italic = j.optBoolean("italic", false),
                 size = j.optDouble("size", defSize.toDouble()).toFloat(),
                 color = j.optString("color", "#ffffff"),
+                gradient = j.optBoolean("gradient", false),
+                color2 = j.optString("color2", "#ffc531"),
                 opacity = j.optDouble("opacity", 1.0).toFloat(),
                 x = j.optDouble("x", 0.5).toFloat(),
                 y = j.optDouble("y", defY.toDouble()).toFloat(),
@@ -65,7 +69,7 @@ data class TextLayerConfig(
 
         fun default(size: Float, y: Float, bold: Boolean) = TextLayerConfig(
             fontKey = "sans", bold = bold, italic = false, size = size,
-            color = "#ffffff", opacity = 1f, x = 0.5f, y = y,
+            color = "#ffffff", gradient = false, color2 = "#ffc531", opacity = 1f, x = 0.5f, y = y,
             stretchX = 1f, stretchY = 1f, rotation = 0f, tracking = 0f,
             outlineWidth = 0f, outlineColor = "#000000",
             shadowOpacity = 0.45f, shadowBlur = 10f, shadowOffsetY = 4f,

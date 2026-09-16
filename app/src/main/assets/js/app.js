@@ -80,6 +80,8 @@
       italic: false,
       size: size,
       color: "#ffffff",
+      gradient: false,
+      color2: "#ffc531",
       opacity: 1,
       x: 0.5,
       y: y,
@@ -151,11 +153,13 @@
     const h = now.getHours();
     const m = now.getMinutes();
     const h12 = h % 12 === 0 ? 12 : h % 12;
+    // Niente ":" tra ore e minuti: erano i "puntini centrali" che l'utente
+    // non vuole piu' vedere nell'orologio.
     switch (c.format) {
-      case "24short": return h + ":" + pad2(m);
-      case "12": return h12 + ":" + pad2(m);
-      case "12ampm": return h12 + ":" + pad2(m) + (h < 12 ? " AM" : " PM");
-      default: return pad2(h) + ":" + pad2(m);
+      case "24short": return h + " " + pad2(m);
+      case "12": return h12 + " " + pad2(m);
+      case "12ampm": return h12 + " " + pad2(m) + (h < 12 ? " AM" : " PM");
+      default: return pad2(h) + " " + pad2(m);
     }
   }
 
@@ -334,7 +338,14 @@
 
     // --- riempimento ---
     applyShadowIfPending();
-    context.fillStyle = style.color;
+    if (style.gradient && maxW > 0) {
+      const grad = context.createLinearGradient(-maxW / 2, 0, maxW / 2, 0);
+      grad.addColorStop(0, style.color);
+      grad.addColorStop(1, style.color2);
+      context.fillStyle = grad;
+    } else {
+      context.fillStyle = style.color;
+    }
     drawLines(context, lines, firstY, lineHeight, tracking, "fill");
 
     context.restore();
@@ -597,10 +608,160 @@
     el.addEventListener("change", () => { setter(el.value); renderPreview(); });
   }
 
+  // ===========================================================================
+  // SELETTORE COLORE PERSONALIZZATO
+  // ===========================================================================
+  // Sostituisce l'<input type="color"> nativo: quello di sistema, quando si
+  // preme "personalizza", riapre gli slider sempre da un colore di default
+  // invece che dal colore attuale. Questo popover invece parte SEMPRE dal
+  // colore corrente dello swatch, cosi' si possono fare micro correzioni.
+
+  function getColorValue(el) { return el.dataset.value || "#ffffff"; }
+  function setColorValue(el, hex) {
+    el.dataset.value = hex;
+    el.style.background = hex;
+  }
+
+  function hexToHsl(hex) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || "#ffffff") || [];
+    const r = parseInt(m[1] || "ff", 16) / 255;
+    const g = parseInt(m[2] || "ff", 16) / 255;
+    const b = parseInt(m[3] || "ff", 16) / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0;
+    const l = (max + min) / 2;
+    const d = max - min;
+    if (d !== 0) {
+      s = d / (1 - Math.abs(2 * l - 1));
+      switch (max) {
+        case r: h = ((g - b) / d) % 6; break;
+        case g: h = (b - r) / d + 2; break;
+        default: h = (r - g) / d + 4;
+      }
+      h *= 60;
+      if (h < 0) h += 360;
+    }
+    return { h: h, s: s * 100, l: l * 100 };
+  }
+
+  function hslToHex(h, s, l) {
+    s /= 100; l /= 100;
+    const c = (1 - Math.abs(2 * l - 1)) * s;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; } else if (h < 120) { r = x; g = c; }
+    else if (h < 180) { g = c; b = x; } else if (h < 240) { g = x; b = c; }
+    else if (h < 300) { r = x; b = c; } else { r = c; b = x; }
+    const toHex = (v) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+    return "#" + toHex(r) + toHex(g) + toHex(b);
+  }
+
+  let colorPopoverEl = null;
+
+  function closeColorPopover() {
+    if (colorPopoverEl) {
+      colorPopoverEl.remove();
+      colorPopoverEl = null;
+      document.removeEventListener("mousedown", onColorPopoverOutside, true);
+      document.removeEventListener("touchstart", onColorPopoverOutside, true);
+    }
+  }
+
+  function onColorPopoverOutside(e) {
+    if (colorPopoverEl && !colorPopoverEl.contains(e.target)) closeColorPopover();
+  }
+
+  function openColorPopover(anchorEl, onChange) {
+    closeColorPopover();
+    const initialHex = getColorValue(anchorEl);
+    const hsl = hexToHsl(initialHex);
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "color-popover-backdrop";
+
+    const sheet = document.createElement("div");
+    sheet.className = "color-popover";
+    sheet.innerHTML = `
+      <div class="color-popover-preview" id="cpPreview"></div>
+      <div class="color-popover-row">
+        <label>Tonalit&agrave;</label>
+        <input type="range" id="cpHue" min="0" max="360" step="1" />
+      </div>
+      <div class="color-popover-row">
+        <label>Saturazione</label>
+        <input type="range" id="cpSat" min="0" max="100" step="1" />
+      </div>
+      <div class="color-popover-row">
+        <label>Luminosit&agrave;</label>
+        <input type="range" id="cpLight" min="0" max="100" step="1" />
+      </div>
+      <div class="color-popover-row">
+        <label>Hex</label>
+        <input type="text" id="cpHex" maxlength="7" />
+      </div>
+      <button type="button" class="upload-btn" id="cpDoneBtn">Fatto</button>
+    `;
+
+    backdrop.appendChild(sheet);
+    document.body.appendChild(backdrop);
+    colorPopoverEl = backdrop;
+
+    const preview = sheet.querySelector("#cpPreview");
+    const hueEl = sheet.querySelector("#cpHue");
+    const satEl = sheet.querySelector("#cpSat");
+    const lightEl = sheet.querySelector("#cpLight");
+    const hexEl = sheet.querySelector("#cpHex");
+
+    let current = { h: hsl.h, s: hsl.s, l: hsl.l };
+
+    function applyBackgrounds() {
+      hueEl.style.background = "linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)";
+      satEl.style.background = `linear-gradient(to right, hsl(${current.h},0%,${current.l}%), hsl(${current.h},100%,${current.l}%))`;
+      lightEl.style.background = `linear-gradient(to right, #000, hsl(${current.h},${current.s}%,50%), #fff)`;
+    }
+
+    function refresh(fromHex) {
+      const hex = hslToHex(current.h, current.s, current.l);
+      preview.style.background = hex;
+      if (!fromHex) hexEl.value = hex;
+      hueEl.value = Math.round(current.h);
+      satEl.value = Math.round(current.s);
+      lightEl.value = Math.round(current.l);
+      applyBackgrounds();
+      setColorValue(anchorEl, hex);
+      onChange(hex);
+    }
+
+    hueEl.addEventListener("input", () => { current.h = Number(hueEl.value); refresh(); });
+    satEl.addEventListener("input", () => { current.s = Number(satEl.value); refresh(); });
+    lightEl.addEventListener("input", () => { current.l = Number(lightEl.value); refresh(); });
+    hexEl.addEventListener("input", () => {
+      const v = hexEl.value.trim();
+      if (/^#?[a-f\d]{6}$/i.test(v)) {
+        const hex = v.startsWith("#") ? v : "#" + v;
+        current = hexToHsl(hex);
+        refresh(true);
+      }
+    });
+    sheet.querySelector("#cpDoneBtn").addEventListener("click", closeColorPopover);
+    backdrop.addEventListener("click", (e) => { if (e.target === backdrop) closeColorPopover(); });
+
+    refresh(false);
+
+    setTimeout(() => {
+      document.addEventListener("mousedown", onColorPopoverOutside, true);
+      document.addEventListener("touchstart", onColorPopoverOutside, true);
+    }, 0);
+  }
+
   function bindColor(id, setter) {
     const el = document.getElementById(id);
     if (!el) return;
-    el.addEventListener("input", () => { setter(el.value); renderPreview(); });
+    setColorValue(el, el.dataset.value || "#ffffff");
+    el.addEventListener("click", () => {
+      openColorPopover(el, (hex) => { setter(hex); renderPreview(); });
+    });
   }
 
   function fillFontSelect(id, selectedKey) {
@@ -659,8 +820,17 @@
   document.getElementById("btnCutoutOther").addEventListener("click", () => requestImage("fg-source"));
 
   document.getElementById("btnCutout").addEventListener("click", () => {
-    if (state.photoDataUrl) openCutoutEditor(state.photoDataUrl);
+    // Se c'e' gia' una sessione di ritaglio attiva (mascherina in corso o gia'
+    // applicata) si riapre esattamente li' invece di rifare l'analisi AI da zero.
+    if (cutoutSourceCanvas && cutoutMaskCanvas) reopenCutoutEditor();
+    else if (state.photoDataUrl) openCutoutEditor(state.photoDataUrl);
     else requestImage("fg-source");
+  });
+
+  // Cliccare sull'anteprima del soggetto riporta all'editor di ritaglio nello
+  // stato in cui era stato lasciato, senza ricominciare.
+  document.getElementById("thumbFg").addEventListener("click", () => {
+    if (cutoutSourceCanvas && cutoutMaskCanvas) reopenCutoutEditor();
   });
 
   function clearSubject() {
@@ -675,6 +845,13 @@
     const thumb = document.getElementById("thumbFg");
     thumb.style.backgroundImage = "";
     thumb.innerHTML = "<span>vuoto</span>";
+    // Niente piu' sessione di ritaglio da riprendere: la prossima apertura
+    // deve ripartire da capo con l'analisi AI.
+    cutoutSourceCanvas = null;
+    cutoutMaskCanvas = null;
+    cutoutMaskedSubjectCanvas = null;
+    cutoutMaskOffsetPx = 0;
+    cutoutOutlineWidthPx = 0;
   }
 
   document.getElementById("btnRemoveFg").addEventListener("click", () => {
@@ -806,6 +983,23 @@
     };
     img.onerror = () => showToast("Immagine non valida");
     img.src = dataUrl;
+  }
+
+  /** Riapre l'editor di ritaglio sulla sessione gia' in corso (mascherina, zoom
+   *  ripristinato, contorno/offset gia' impostati), senza rilanciare l'AI. */
+  function reopenCutoutEditor() {
+    if (!cutoutSourceCanvas || !cutoutMaskCanvas) {
+      if (state.photoDataUrl) openCutoutEditor(state.photoDataUrl);
+      else requestImage("fg-source");
+      return;
+    }
+    cutoutCanvas.width = cutoutSourceCanvas.width;
+    cutoutCanvas.height = cutoutSourceCanvas.height;
+    setSlider("cutoutOffsetRange", cutoutMaskOffsetPx);
+    setSlider("cutoutOutlineRange", cutoutOutlineWidthPx);
+    resetCutoutView();
+    cutoutModal.classList.remove("hidden");
+    renderCutoutPreview();
   }
 
   // ---------------------------------------------------------------------------
@@ -1157,6 +1351,12 @@
     bindRange(prefix + "TrackRange", prefix + "TrackValue", (v) => { st().tracking = v; });
 
     bindColor(prefix + "ColorPicker", (v) => { st().color = v; });
+    bindColor(prefix + "Color2Picker", (v) => { st().color2 = v; });
+    bindCheck(prefix + "GradientCheck", (v) => {
+      st().gradient = v;
+      const el = document.getElementById(prefix + "Color2Picker");
+      if (el) el.classList.toggle("hidden", !v);
+    });
     bindRange(prefix + "OpacityRange", prefix + "OpacityValue", (v) => { st().opacity = v / 100; }, (v) => v + "%");
 
     bindRange(prefix + "OutlineRange", prefix + "OutlineValue", (v) => { st().outlineWidth = v; });
@@ -1179,13 +1379,18 @@
   function syncTextLayerUi(prefix, layer) {
     const s = layer.style;
     const set = (id, prop, value) => { const el = document.getElementById(id); if (el) el[prop] = value; };
+    const setColor = (id, value) => { const el = document.getElementById(id); if (el) setColorValue(el, value); };
     set(prefix + "FontSelect", "value", s.fontKey);
     set(prefix + "BoldCheck", "checked", s.bold);
     set(prefix + "ItalicCheck", "checked", s.italic);
-    set(prefix + "ColorPicker", "value", s.color);
-    set(prefix + "OutlineColor", "value", s.outlineColor);
-    set(prefix + "GlowColor", "value", s.glowColor);
-    set(prefix + "PlateColor", "value", s.plateColor);
+    setColor(prefix + "ColorPicker", s.color);
+    setColor(prefix + "Color2Picker", s.color2);
+    set(prefix + "GradientCheck", "checked", !!s.gradient);
+    const color2El = document.getElementById(prefix + "Color2Picker");
+    if (color2El) color2El.classList.toggle("hidden", !s.gradient);
+    setColor(prefix + "OutlineColor", s.outlineColor);
+    setColor(prefix + "GlowColor", s.glowColor);
+    setColor(prefix + "PlateColor", s.plateColor);
     setSlider(prefix + "SizeRange", s.size);
     setSlider(prefix + "TrackRange", s.tracking);
     setSlider(prefix + "OpacityRange", Math.round(s.opacity * 100));
@@ -1571,7 +1776,7 @@
   function styleJson(s) {
     return {
       fontKey: s.fontKey, bold: s.bold, italic: s.italic, size: s.size,
-      color: s.color, opacity: s.opacity, x: s.x, y: s.y,
+      color: s.color, gradient: s.gradient, color2: s.color2, opacity: s.opacity, x: s.x, y: s.y,
       stretchX: s.stretchX, stretchY: s.stretchY, rotation: s.rotation || 0, tracking: s.tracking,
       outlineWidth: s.outlineWidth, outlineColor: s.outlineColor,
       glowWidth: s.glowWidth, glowColor: s.glowColor,
