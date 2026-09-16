@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Descrittore di sistema per il Live Wallpaper. "settingsActivity" e' ciò che permette
+  all'utente di toccare l'icona a ingranaggio nel selettore di sfondi animati di Android
+  per tornare direttamente al nostro editor.
+-->
+<wallpaper xmlns:android="http://schemas.android.com/apk/res/android"
+    android:thumbnail="@mipmap/ic_launcher"
+    android:description="@string/wallpaper_description"
+    android:settingsActivity="com.depthwallpaper.creator.MainActivity" />

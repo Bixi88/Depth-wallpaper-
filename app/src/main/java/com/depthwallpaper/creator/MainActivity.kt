@@ -1,0 +1,316 @@
+package com.depthwallpaper.creator
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.WallpaperManager
+import android.content.ActivityNotFoundException
+import android.content.ComponentName
+import android.content.ContentValues
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
+import android.util.Base64
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import java.io.OutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/**
+ * Host nativo minimale: l'intera UI/UX e il motore di rendering a 3 layer
+ * vivono in assets/index.html (Canvas HTML5). Questa Activity fornisce solo
+ * i "superpoteri" nativi che una WebView sandboxata non ha:
+ *  - selezione immagini dalla galleria del dispositivo (SAF)
+ *  - scrittura del PNG esportato nella galleria pubblica (MediaStore)
+ */
+class MainActivity : ComponentActivity() {
+
+    private lateinit var webView: WebView
+
+    /** Layer per cui è stata avviata l'ultima richiesta di selezione immagine ("bg" o "fg"). */
+    private var pendingLayer: String = "bg"
+
+    /** Dati in attesa di un permesso di scrittura storage (solo Android <= 9). */
+    private var pendingSaveBytes: ByteArray? = null
+    private var pendingSaveFileName: String? = null
+
+    private val pickImageLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            handlePickedImage(uri)
+        }
+
+    private val requestStoragePermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            val bytes = pendingSaveBytes
+            val name = pendingSaveFileName
+            pendingSaveBytes = null
+            pendingSaveFileName = null
+            if (granted && bytes != null && name != null) {
+                val ok = saveBitmapToGallery(bytes, name)
+                notifyImageSaved(ok)
+            } else {
+                notifyImageSaved(false)
+            }
+        }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        webView = findViewById(R.id.webview)
+        setupWebView()
+        webView.loadUrl("file:///android_asset/index.html")
+    }
+
+    override fun onBackPressed() {
+        if (webView.canGoBack()) {
+            webView.goBack()
+        } else {
+            super.onBackPressed()
+        }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun setupWebView() {
+        with(webView.settings) {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            allowFileAccess = true
+            useWideViewPort = true
+            loadWithOverviewMode = true
+            mediaPlaybackRequiresUserGesture = false
+        }
+        webView.webViewClient = WebViewClient()
+        webView.webChromeClient = WebChromeClient()
+        webView.addJavascriptInterface(WebAppBridge(), "Android")
+    }
+
+    // ---------------------------------------------------------------------
+    // Selezione immagini (Media tab: sfondo + soggetto ritagliato)
+    // ---------------------------------------------------------------------
+
+    private fun handlePickedImage(uri: Uri?) {
+        if (uri == null) {
+            notifyImageLoaded(pendingLayer, null)
+            return
+        }
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: SecurityException) {
+            // Alcuni provider non supportano i permessi persistenti: non è bloccante,
+            // ci serve solo leggere il file una volta per convertirlo in base64.
+        }
+
+        try {
+            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (bytes == null) {
+                notifyImageLoaded(pendingLayer, null)
+                return
+            }
+            val mime = contentResolver.getType(uri) ?: "image/png"
+            val base64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+            notifyImageLoaded(pendingLayer, "data:$mime;base64,$base64")
+        } catch (e: Exception) {
+            notifyImageLoaded(pendingLayer, null)
+        }
+    }
+
+    private fun notifyImageLoaded(layer: String, dataUrl: String?) {
+        runOnUiThread {
+            val arg = if (dataUrl != null) "'${dataUrl}'" else "null"
+            webView.evaluateJavascript(
+                "window.onImageLoaded && window.onImageLoaded('$layer', $arg);",
+                null
+            )
+        }
+    }
+
+    private fun notifyImageSaved(success: Boolean) {
+        runOnUiThread {
+            webView.evaluateJavascript(
+                "window.onImageSaved && window.onImageSaved($success);",
+                null
+            )
+            Toast.makeText(
+                this,
+                if (success) "Immagine salvata in Galleria \u2022 Pictures/DepthWallpaper" else "Salvataggio non riuscito",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Export PNG in galleria
+    // ---------------------------------------------------------------------
+
+    private fun saveBitmapToGallery(bytes: ByteArray, fileName: String): Boolean {
+        return try {
+            val resolver = contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(
+                        MediaStore.Images.Media.RELATIVE_PATH,
+                        Environment.DIRECTORY_PICTURES + "/DepthWallpaper"
+                    )
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+            }
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return false
+
+            resolver.openOutputStream(uri)?.use { out: OutputStream -> out.write(bytes) }
+                ?: return false
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun defaultFileName(): String {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        return "depth_wallpaper_$stamp.png"
+    }
+
+    // ---------------------------------------------------------------------
+    // Ponte JavaScript <-> Kotlin esposto alla pagina in assets/index.html
+    // ---------------------------------------------------------------------
+
+    inner class WebAppBridge {
+
+        /** Chiamato dal JS quando l'utente tocca "Carica immagine" per il layer indicato. */
+        @JavascriptInterface
+        fun pickImage(layer: String) {
+            pendingLayer = if (layer == "fg") "fg" else "bg"
+            runOnUiThread {
+                try {
+                    pickImageLauncher.launch(arrayOf("image/*"))
+                } catch (e: Exception) {
+                    notifyImageLoaded(pendingLayer, null)
+                }
+            }
+        }
+
+        /** Chiamato dal JS con il PNG renderizzato (data URL) pronto per l'export. */
+        @JavascriptInterface
+        fun saveImage(base64PngDataUrl: String, suggestedFileName: String?) {
+            val fileName = if (suggestedFileName.isNullOrBlank()) defaultFileName() else suggestedFileName
+            runOnUiThread {
+                try {
+                    val pureBase64 = base64PngDataUrl.substringAfter(",", base64PngDataUrl)
+                    val bytes = Base64.decode(pureBase64, Base64.DEFAULT)
+
+                    val needsLegacyPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                        ContextCompat.checkSelfPermission(
+                            this@MainActivity,
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE
+                        ) != PackageManager.PERMISSION_GRANTED
+
+                    if (needsLegacyPermission) {
+                        pendingSaveBytes = bytes
+                        pendingSaveFileName = fileName
+                        requestStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    } else {
+                        val ok = saveBitmapToGallery(bytes, fileName)
+                        notifyImageSaved(ok)
+                    }
+                } catch (e: Exception) {
+                    notifyImageSaved(false)
+                }
+            }
+        }
+
+        /** Piccola utility per mostrare messaggi nativi (Toast) dal JS, se serve. */
+        @JavascriptInterface
+        fun showToast(message: String) {
+            runOnUiThread {
+                Toast.makeText(this@MainActivity, message, Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        /**
+         * Chiamato dal JS quando l'utente tocca "Imposta sfondo animato".
+         * Salva configurazione + immagini per il DepthWallpaperService, poi apre
+         * il selettore di sistema (che gestisce da solo la scelta Home/Lock/Entrambi).
+         */
+        @JavascriptInterface
+        fun applyLiveWallpaper(configJson: String, bgDataUrl: String, fgDataUrl: String?) {
+            runOnUiThread {
+                try {
+                    writeDataUrlToFile(bgDataUrl, ConfigStore.bgFile(applicationContext))
+
+                    val fgFile = ConfigStore.fgFile(applicationContext)
+                    if (!fgDataUrl.isNullOrBlank()) {
+                        writeDataUrlToFile(fgDataUrl, fgFile)
+                    } else if (fgFile.exists()) {
+                        fgFile.delete()
+                    }
+
+                    ConfigStore.saveConfigJson(applicationContext, configJson)
+                    ConfigStore.notifyConfigUpdated(applicationContext)
+
+                    openLiveWallpaperPicker()
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "Errore nel preparare lo sfondo animato", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    private fun writeDataUrlToFile(dataUrl: String, target: java.io.File) {
+        val pureBase64 = dataUrl.substringAfter(",", dataUrl)
+        val bytes = Base64.decode(pureBase64, Base64.DEFAULT)
+        target.writeBytes(bytes)
+    }
+
+    /**
+     * Apre l'esperienza di sistema per applicare il nostro Live Wallpaper. Su Android
+     * questa UI mostra già in autonomia la scelta tra Schermata Home, Blocco o entrambe.
+     */
+    private fun openLiveWallpaperPicker() {
+        val component = ComponentName(this, DepthWallpaperService::class.java)
+
+        val changeIntent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER)
+        changeIntent.putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT, component)
+        try {
+            startActivity(changeIntent)
+            return
+        } catch (e: ActivityNotFoundException) {
+            // Alcuni OEM non risolvono questo intent: proviamo il chooser generico.
+        }
+
+        try {
+            startActivity(Intent(WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER))
+            return
+        } catch (e: ActivityNotFoundException) {
+            // Ultima spiaggia
+        }
+
+        Toast.makeText(
+            this,
+            "Apri Impostazioni > Sfondo per selezionare manualmente \"${getString(R.string.app_name)}\"",
+            Toast.LENGTH_LONG
+        ).show()
+    }
+}

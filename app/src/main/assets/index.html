@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Depth Wallpaper Creator</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- ============== HEADER ============== -->
+  <header id="app-header">
+    <span class="logo-dot"></span>
+    <h1>Depth Wallpaper</h1>
+    <button id="applyLiveBtn" class="export-btn" title="Imposta come sfondo animato">
+      <span class="icon">&#9889;</span> Imposta sfondo
+    </button>
+  </header>
+
+  <div id="main-layout">
+
+    <!-- ============== PREVIEW (Canvas 9:16) ============== -->
+    <section id="preview-wrap">
+      <div id="canvas-frame">
+        <canvas id="mainCanvas" width="1080" height="1920"></canvas>
+        <div id="emptyState">
+          <p>Carica un'immagine di sfondo per iniziare</p>
+        </div>
+      </div>
+      <p id="dragHint">Suggerimento: trascina l'orologio direttamente sull'anteprima</p>
+      <p class="hint-text center">L'orologio si aggiorna dal vivo e resta sempre dietro al soggetto: il risultato è un vero sfondo animato, non un'immagine statica.</p>
+    </section>
+
+    <!-- ============== PANNELLO CONTROLLI ============== -->
+    <section id="controls">
+
+      <nav id="tabs">
+        <button class="tab-btn active" data-tab="media">
+          <span class="tab-ico">&#128444;</span> Media
+        </button>
+        <button class="tab-btn" data-tab="clock">
+          <span class="tab-ico">&#8986;</span> Orologio
+        </button>
+        <button class="tab-btn" data-tab="fx">
+          <span class="tab-ico">&#9881;</span> Effetti
+        </button>
+      </nav>
+
+      <div id="tab-panels">
+
+        <!-- ---- TAB: MEDIA ---- -->
+        <div class="panel active" id="panel-media">
+          <div class="field-group">
+            <label>Livello 0 &middot; Sfondo</label>
+            <div class="upload-row">
+              <button class="upload-btn" id="btnUploadBg">Carica immagine di sfondo</button>
+              <div class="thumb" id="thumbBg"><span>vuoto</span></div>
+            </div>
+          </div>
+
+          <div class="field-group">
+            <label>Livello 2 &middot; Soggetto (PNG trasparente)</label>
+            <div class="upload-row">
+              <button class="upload-btn" id="btnUploadFg">Carica soggetto ritagliato</button>
+              <div class="thumb checker" id="thumbFg"><span>vuoto</span></div>
+            </div>
+            <p class="hint-text">Per l'effetto profondità il soggetto deve avere lo sfondo trasparente (PNG). Le parti trasparenti lasceranno intravedere l'orologio sottostante.</p>
+          </div>
+        </div>
+
+        <!-- ---- TAB: OROLOGIO ---- -->
+        <div class="panel" id="panel-clock">
+
+          <div class="field-group">
+            <label>Contenuto</label>
+            <div class="segmented" id="clockModeSeg">
+              <button class="seg-btn active" data-mode="time">Ora corrente</button>
+              <button class="seg-btn" data-mode="custom">Testo personalizzato</button>
+            </div>
+          </div>
+
+          <div class="field-group" id="customTextGroup" style="display:none;">
+            <label for="customTextInput">Testo</label>
+            <input type="text" id="customTextInput" placeholder="Scrivi qualcosa..." maxlength="40" />
+          </div>
+
+          <div class="field-group" id="showDateGroup">
+            <label class="checkbox-row">
+              <input type="checkbox" id="showDateCheck" checked />
+              <span>Mostra data sotto l'ora</span>
+            </label>
+          </div>
+
+          <div class="field-group">
+            <label for="fontSelect">Font</label>
+            <select id="fontSelect">
+              <option value="sans" selected>Sans (Helvetica / Segoe)</option>
+              <option value="serif">Serif (Georgia / Times)</option>
+              <option value="monospace">Monospace (Courier)</option>
+              <option value="condensed">Condensed (stile Impact)</option>
+            </select>
+            <p class="hint-text">Nel sfondo animato il font viene reso con il carattere di sistema Android più vicino a quello scelto qui.</p>
+          </div>
+
+          <div class="field-group">
+            <label class="checkbox-row">
+              <input type="checkbox" id="boldCheck" checked />
+              <span>Testo in grassetto</span>
+            </label>
+          </div>
+
+          <div class="field-group">
+            <label>Dimensione <span class="value-badge" id="sizeValue">140</span></label>
+            <input type="range" id="sizeRange" min="40" max="320" value="140" />
+          </div>
+
+          <div class="field-group">
+            <label>Colore</label>
+            <input type="color" id="colorPicker" value="#ffffff" />
+          </div>
+
+          <div class="field-group">
+            <label>Opacit&agrave; <span class="value-badge" id="opacityValue">100%</span></label>
+            <input type="range" id="opacityRange" min="0" max="100" value="100" />
+          </div>
+
+          <div class="field-group">
+            <label>Posizione orizzontale <span class="value-badge" id="posXValue">50%</span></label>
+            <input type="range" id="posXRange" min="0" max="100" value="50" />
+          </div>
+
+          <div class="field-group">
+            <label>Posizione verticale <span class="value-badge" id="posYValue">35%</span></label>
+            <input type="range" id="posYRange" min="0" max="100" value="35" />
+          </div>
+        </div>
+
+        <!-- ---- TAB: EFFETTI ---- -->
+        <div class="panel" id="panel-fx">
+
+          <div class="field-group">
+            <label>Oscura sfondo <span class="value-badge" id="dimValue">0%</span></label>
+            <input type="range" id="dimRange" min="0" max="100" value="0" />
+            <p class="hint-text">Aumenta il contrasto dell'orologio scurendo leggermente lo sfondo.</p>
+          </div>
+
+          <div class="field-group">
+            <label class="checkbox-row">
+              <input type="checkbox" id="parallaxCheck" checked />
+              <span>Parallasse al movimento (giroscopio)</span>
+            </label>
+            <p class="hint-text">Solo nello sfondo animato: inclinando il telefono i livelli si muovono a velocità diverse, rafforzando l'effetto di profondità. Non visibile in questa anteprima.</p>
+          </div>
+
+          <div class="field-group section-title">Livello 0 &middot; Sfondo</div>
+          <div class="field-group">
+            <label>Zoom <span class="value-badge" id="bgScaleValue">100%</span></label>
+            <input type="range" id="bgScaleRange" min="100" max="220" value="100" />
+          </div>
+          <div class="field-group">
+            <label>Sposta orizzontalmente <span class="value-badge" id="bgXValue">0</span></label>
+            <input type="range" id="bgXRange" min="-100" max="100" value="0" />
+          </div>
+          <div class="field-group">
+            <label>Sposta verticalmente <span class="value-badge" id="bgYValue">0</span></label>
+            <input type="range" id="bgYRange" min="-100" max="100" value="0" />
+          </div>
+
+          <div class="field-group section-title">Livello 2 &middot; Soggetto</div>
+          <div class="field-group">
+            <label>Scala <span class="value-badge" id="fgScaleValue">100%</span></label>
+            <input type="range" id="fgScaleRange" min="40" max="220" value="100" />
+          </div>
+          <div class="field-group">
+            <label>Sposta orizzontalmente <span class="value-badge" id="fgXValue">0</span></label>
+            <input type="range" id="fgXRange" min="-100" max="100" value="0" />
+          </div>
+          <div class="field-group">
+            <label>Sposta verticalmente <span class="value-badge" id="fgYValue">0</span></label>
+            <input type="range" id="fgYRange" min="-100" max="100" value="0" />
+          </div>
+
+          <div class="field-group">
+            <button class="upload-btn ghost" id="btnResetFx">Ripristina regolazioni</button>
+          </div>
+
+          <div class="field-group section-title">Esportazione</div>
+          <div class="field-group">
+            <button class="upload-btn ghost" id="exportPngBtn">Esporta anche come PNG statico</button>
+            <p class="hint-text">Utile per condividere un'anteprima; non sostituisce lo sfondo animato.</p>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<!-- input file nascosto: usato solo per il fallback "modalità browser" (test su desktop) -->
+<input type="file" id="hiddenFileInput" accept="image/*" style="display:none;" />
+
+<script src="js/app.js"></script>
+</body>
+</html>
