@@ -1,0 +1,39 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout codice
+        uses: actions/checkout@v4
+
+      - name: Imposta JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Imposta Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Installa pacchetti SDK necessari
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Genera Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.7
+
+      - name: Compila APK di debug
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Carica APK come artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: depth-wallpaper-debug
+          path: app/build/outputs/apk/debug/*.apk
