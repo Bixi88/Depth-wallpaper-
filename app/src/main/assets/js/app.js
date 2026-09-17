@@ -610,28 +610,46 @@
     window.addEventListener("mouseup", onUp);
   }
 
-  /** Aggiunge, accanto al valore, il pulsante "↺" che riporta lo slider al centro
-   *  di riferimento in un tocco (stile "Studio"). E' l'unico modo per tornare al
-   *  centro: essendo un pulsante normale, e' sempre esattamente dove ci si aspetta,
-   *  a differenza di un indicatore sovrapposto allo slider. */
+  /** Aggiunge, accanto al valore, i pulsanti "-" / "+" (passo di 1, utili per le
+   *  regolazioni di precisione) e il pulsante "↺" che riporta lo slider al centro
+   *  di riferimento in un tocco (stile "Studio"). Quest'ultimo e' l'unico modo per
+   *  tornare al centro: essendo un pulsante normale, e' sempre esattamente dove ci
+   *  si aspetta, a differenza di un indicatore sovrapposto allo slider. */
   function attachResetIcon(s, badge) {
     if (!badge || !badge.parentNode) return;
     const wrap = document.createElement("span");
     wrap.className = "value-wrap";
     badge.parentNode.insertBefore(wrap, badge);
-    wrap.appendChild(badge);
 
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "value-reset-btn";
-    btn.title = "Ripristina";
-    btn.textContent = "\u21BA";
-    btn.addEventListener("click", (e) => {
+    function stepBtn(label, title, delta) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "value-step-btn";
+      btn.title = title;
+      btn.textContent = label;
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        applySlider(s, Number(s.input.value) + delta, true);
+      });
+      return btn;
+    }
+
+    wrap.appendChild(stepBtn("\u2212", "Diminuisci di 1", -1));
+    wrap.appendChild(badge);
+    wrap.appendChild(stepBtn("+", "Aumenta di 1", 1));
+
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "value-reset-btn";
+    resetBtn.title = "Ripristina";
+    resetBtn.textContent = "\u21BA";
+    resetBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
       applySlider(s, s.center, true);
     });
-    wrap.appendChild(btn);
+    wrap.appendChild(resetBtn);
   }
 
   function bindRange(rangeId, badgeId, setter, formatter) {
@@ -922,7 +940,7 @@
     cutoutMaskedSubjectCanvas = null;
     cutoutMaskOffsetPx = 0;
     cutoutOutlineWidthPx = 0;
-    cutoutSmoothPx = 3;
+    cutoutSmoothPx = 0;
   }
 
   document.getElementById("btnRemoveFg").addEventListener("click", () => {
@@ -982,7 +1000,7 @@
   // entrambi a 0 all'apertura dell'editor, come richiesto ("sempre inizialmente centrale").
   let cutoutMaskOffsetPx = 0;
   let cutoutOutlineWidthPx = 0;
-  let cutoutSmoothPx = 3;
+  let cutoutSmoothPx = 0;
 
   // Zoom/pan del canvas di ritaglio (pizzico con due dita) e mirino di precisione
   // per il pennello: vedi sezione dedicata piu' sotto.
@@ -1045,10 +1063,10 @@
 
       cutoutMaskOffsetPx = 0;
       cutoutOutlineWidthPx = 0;
-      cutoutSmoothPx = 3;
+      cutoutSmoothPx = 0;
       setSlider("cutoutOffsetRange", 0);
       setSlider("cutoutOutlineRange", 0);
-      setSlider("cutoutSmoothRange", 3);
+      setSlider("cutoutSmoothRange", 0);
       resetCutoutView();
 
       cutoutModal.classList.remove("hidden");
@@ -1512,30 +1530,13 @@
   bindTextLayer("date", () => state.date);
 
   // --- specifico orologio ---
-  const customTextGroup = document.getElementById("customTextGroup");
-  const clockFormatGroup = document.getElementById("clockFormatGroup");
-
+  // Il "testo fisso" non e' piu' offerto in interfaccia: l'orologio mostra
+  // sempre l'ora corrente. syncClockMode() resta come no-op innocuo nel caso
+  // qualche configurazione salvata in precedenza avesse ancora mode:"custom".
   function syncClockMode() {
-    const custom = state.clock.mode === "custom";
-    customTextGroup.style.display = custom ? "block" : "none";
-    clockFormatGroup.style.display = custom ? "none" : "block";
+    state.clock.mode = "time";
   }
-
-  document.querySelectorAll("#clockModeSeg .seg-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll("#clockModeSeg .seg-btn").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      state.clock.mode = btn.dataset.mode;
-      syncClockMode();
-      renderPreview();
-    });
-  });
   syncClockMode();
-
-  document.getElementById("customTextInput").addEventListener("input", (e) => {
-    state.clock.customText = e.target.value;
-    renderPreview();
-  });
 
   bindCheck("clockEnabledCheck", (v) => { state.clock.enabled = v; });
   bindSelect("clockFormatSelect", (v) => { state.clock.format = v; });
@@ -1629,8 +1630,6 @@
 
     document.getElementById("clockEnabledCheck").checked = true;
     document.getElementById("clockFormatSelect").value = "24";
-    document.getElementById("customTextInput").value = "";
-    document.querySelectorAll("#clockModeSeg .seg-btn").forEach((b) => b.classList.toggle("active", b.dataset.mode === "time"));
     syncClockMode();
     document.getElementById("dateEnabledCheck").checked = true;
     document.getElementById("dateFormatSelect").value = "full";
@@ -1964,10 +1963,8 @@
 
       document.getElementById("clockEnabledCheck").checked = state.clock.enabled;
       document.getElementById("clockFormatSelect").value = state.clock.format;
-      document.getElementById("customTextInput").value = state.clock.customText;
-      document.querySelectorAll("#clockModeSeg .seg-btn").forEach((b) => {
-        b.classList.toggle("active", b.dataset.mode === state.clock.mode);
-      });
+      // Una configurazione salvata in precedenza potrebbe avere mode:"custom":
+      // l'interfaccia non lo offre piu', quindi si ricade sempre sull'ora corrente.
       syncClockMode();
       document.getElementById("dateEnabledCheck").checked = state.date.enabled;
       document.getElementById("dateFormatSelect").value = state.date.format;

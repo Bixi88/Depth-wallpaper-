@@ -124,14 +124,6 @@
             </label>
           </div>
 
-          <div class="field-group">
-            <label>Contenuto</label>
-            <div class="segmented" id="clockModeSeg">
-              <button class="seg-btn active" data-mode="time">Ora corrente</button>
-              <button class="seg-btn" data-mode="custom">Testo fisso</button>
-            </div>
-          </div>
-
           <div class="field-group" id="clockFormatGroup">
             <label for="clockFormatSelect">Formato ora</label>
             <select id="clockFormatSelect">
@@ -142,9 +134,29 @@
             </select>
           </div>
 
-          <div class="field-group" id="customTextGroup" style="display:none;">
-            <label for="customTextInput">Testo</label>
-            <input type="text" id="customTextInput" placeholder="Scrivi qualcosa..." maxlength="60" />
+          <div class="field-group section-title">Posizione</div>
+          <div class="field-group">
+            <label>Orizzontale <span class="value-badge" id="clockXValue">50%</span></label>
+            <input type="range" id="clockXRange" min="0" max="100" value="50" data-center="50" />
+          </div>
+          <div class="field-group">
+            <label>Verticale <span class="value-badge" id="clockYValue">30%</span></label>
+            <input type="range" id="clockYRange" min="0" max="100" value="30" data-center="30" />
+          </div>
+          <div class="field-group">
+            <label>Rotazione <span class="value-badge" id="clockRotationValue">0&deg;</span></label>
+            <input type="range" id="clockRotationRange" min="-180" max="180" value="0" data-center="0" />
+            <p class="hint-text">Ruota il testo attorno al suo centro: utile per titoli in verticale o inclinati lungo il soggetto.</p>
+          </div>
+
+          <div class="field-group section-title">Deformazione</div>
+          <div class="field-group">
+            <label>Stretch orizzontale <span class="value-badge" id="clockStretchXValue">100%</span></label>
+            <input type="range" id="clockStretchXRange" min="40" max="250" value="100" data-center="100" />
+          </div>
+          <div class="field-group">
+            <label>Stretch verticale <span class="value-badge" id="clockStretchYValue">100%</span></label>
+            <input type="range" id="clockStretchYRange" min="40" max="250" value="100" data-center="100" />
           </div>
 
           <div class="field-group section-title">Carattere</div>
@@ -214,31 +226,6 @@
             <input type="range" id="clockShadowOffRange" min="-20" max="40" value="4" data-center="4" />
           </div>
 
-          <div class="field-group section-title">Posizione</div>
-          <div class="field-group">
-            <label>Orizzontale <span class="value-badge" id="clockXValue">50%</span></label>
-            <input type="range" id="clockXRange" min="0" max="100" value="50" data-center="50" />
-          </div>
-          <div class="field-group">
-            <label>Verticale <span class="value-badge" id="clockYValue">30%</span></label>
-            <input type="range" id="clockYRange" min="0" max="100" value="30" data-center="30" />
-          </div>
-          <div class="field-group">
-            <label>Rotazione <span class="value-badge" id="clockRotationValue">0&deg;</span></label>
-            <input type="range" id="clockRotationRange" min="-180" max="180" value="0" data-center="0" />
-            <p class="hint-text">Ruota il testo attorno al suo centro: utile per titoli in verticale o inclinati lungo il soggetto.</p>
-          </div>
-
-          <div class="field-group section-title">Deformazione</div>
-          <div class="field-group">
-            <label>Stretch orizzontale <span class="value-badge" id="clockStretchXValue">100%</span></label>
-            <input type="range" id="clockStretchXRange" min="40" max="250" value="100" data-center="100" />
-          </div>
-          <div class="field-group">
-            <label>Stretch verticale <span class="value-badge" id="clockStretchYValue">100%</span></label>
-            <input type="range" id="clockStretchYRange" min="40" max="250" value="100" data-center="100" />
-          </div>
-
           <div class="field-group">
             <button class="upload-btn ghost" id="clockResetBtn">Ripristina orologio</button>
           </div>
@@ -264,6 +251,30 @@
           </div>
           <div class="field-group">
             <label class="checkbox-row"><input type="checkbox" id="dateUppercaseCheck" /><span>Tutto MAIUSCOLO</span></label>
+          </div>
+
+          <div class="field-group section-title">Posizione</div>
+          <div class="field-group">
+            <label>Orizzontale <span class="value-badge" id="dateXValue">50%</span></label>
+            <input type="range" id="dateXRange" min="0" max="100" value="50" data-center="50" />
+          </div>
+          <div class="field-group">
+            <label>Verticale <span class="value-badge" id="dateYValue">38%</span></label>
+            <input type="range" id="dateYRange" min="0" max="100" value="38" data-center="38" />
+          </div>
+          <div class="field-group">
+            <label>Rotazione <span class="value-badge" id="dateRotationValue">0&deg;</span></label>
+            <input type="range" id="dateRotationRange" min="-180" max="180" value="0" data-center="0" />
+          </div>
+
+          <div class="field-group section-title">Deformazione</div>
+          <div class="field-group">
+            <label>Stretch orizzontale <span class="value-badge" id="dateStretchXValue">100%</span></label>
+            <input type="range" id="dateStretchXRange" min="40" max="250" value="100" data-center="100" />
+          </div>
+          <div class="field-group">
+            <label>Stretch verticale <span class="value-badge" id="dateStretchYValue">100%</span></label>
+            <input type="range" id="dateStretchYRange" min="40" max="250" value="100" data-center="100" />
           </div>
 
           <div class="field-group section-title">Carattere</div>
@@ -330,30 +341,6 @@
           <div class="field-group">
             <label>Ombra &middot; distanza <span class="value-badge" id="dateShadowOffValue">4</span></label>
             <input type="range" id="dateShadowOffRange" min="-20" max="40" value="4" data-center="4" />
-          </div>
-
-          <div class="field-group section-title">Posizione</div>
-          <div class="field-group">
-            <label>Orizzontale <span class="value-badge" id="dateXValue">50%</span></label>
-            <input type="range" id="dateXRange" min="0" max="100" value="50" data-center="50" />
-          </div>
-          <div class="field-group">
-            <label>Verticale <span class="value-badge" id="dateYValue">38%</span></label>
-            <input type="range" id="dateYRange" min="0" max="100" value="38" data-center="38" />
-          </div>
-          <div class="field-group">
-            <label>Rotazione <span class="value-badge" id="dateRotationValue">0&deg;</span></label>
-            <input type="range" id="dateRotationRange" min="-180" max="180" value="0" data-center="0" />
-          </div>
-
-          <div class="field-group section-title">Deformazione</div>
-          <div class="field-group">
-            <label>Stretch orizzontale <span class="value-badge" id="dateStretchXValue">100%</span></label>
-            <input type="range" id="dateStretchXRange" min="40" max="250" value="100" data-center="100" />
-          </div>
-          <div class="field-group">
-            <label>Stretch verticale <span class="value-badge" id="dateStretchYValue">100%</span></label>
-            <input type="range" id="dateStretchYRange" min="40" max="250" value="100" data-center="100" />
           </div>
 
           <div class="field-group">
@@ -463,8 +450,8 @@
       <p class="hint-text">A sinistra riduce il ritaglio pixel per pixel su tutto il perimetro: utile per togliere il bordino chiaro che resta quando lo sfondo originale era simile al soggetto. A destra lo allarga.</p>
     </div>
     <div class="field-group">
-      <label>Morbidezza bordi <span class="value-badge" id="cutoutSmoothValue">3 px</span></label>
-      <input type="range" id="cutoutSmoothRange" min="0" max="20" value="3" data-center="3" />
+      <label>Morbidezza bordi <span class="value-badge" id="cutoutSmoothValue">0 px</span></label>
+      <input type="range" id="cutoutSmoothRange" min="0" max="10" value="0" data-center="0" />
       <p class="hint-text">Arrotonda i bordi "a scalini" del ritaglio e del bordo adesivo: 0 = netto (piu' pixelloso), valori alti = piu' sfumato.</p>
     </div>
     <div class="field-group">

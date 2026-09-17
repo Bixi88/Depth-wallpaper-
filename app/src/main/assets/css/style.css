@@ -505,6 +505,32 @@ label {
   transform: rotate(-70deg);
 }
 
+/* Pulsanti "-1" / "+1" accanto al valore: regolazioni di precisione a passo
+   singolo, senza dover trascinare lo slider. */
+.value-step-btn {
+  background: var(--bg-3);
+  border: none;
+  color: var(--text-0);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+.value-step-btn:active {
+  background: var(--accent);
+  color: var(--accent-ink);
+  transform: scale(0.9);
+}
+
 input[type="range"] {
   -webkit-appearance: none;
   width: 100%;
