@@ -32,6 +32,8 @@
     { key: "tightenCaps", label: "Tighten Caps", css: "'Tighten Caps', sans-serif", bundled: true },
     { key: "skyscraper", label: "Skyscraper Condensed", css: "'Skyscraper Condensed', sans-serif", bundled: true },
     { key: "sensationalSans", label: "Sensational Sans", css: "'Sensational Sans', sans-serif", bundled: true },
+    // ATTENZIONE: file demo (uso personale) - vedi nota di licenza in style.css.
+    { key: "calcio", label: "Calcio (demo)", css: "'Calcio', sans-serif", bundled: true },
   ];
 
   /**
@@ -81,6 +83,7 @@
       size: size,
       color: "#ffffff",
       gradient: false,
+      gradientDirection: "horizontal", // "horizontal" | "vertical" | "fadeDown"
       color2: "#ffc531",
       opacity: 1,
       x: 0.5,
@@ -396,10 +399,20 @@
       shadowPending = false;
     }
     if (style.gradient && maxW > 0) {
-      const grad = context.createLinearGradient(-maxW / 2, 0, maxW / 2, 0);
-      grad.addColorStop(0, style.color);
-      grad.addColorStop(1, style.color2);
-      context.fillStyle = grad;
+      const dir = style.gradientDirection || "horizontal";
+      if (dir === "vertical" || dir === "fadeDown") {
+        const top = firstY - lineHeight / 2;
+        const bottom = firstY + (lines.length - 1) * lineHeight + lineHeight / 2;
+        const grad = context.createLinearGradient(0, top, 0, bottom);
+        grad.addColorStop(0, style.color);
+        grad.addColorStop(1, dir === "fadeDown" ? hexToRgba(style.color, 0) : style.color2);
+        context.fillStyle = grad;
+      } else {
+        const grad = context.createLinearGradient(-maxW / 2, 0, maxW / 2, 0);
+        grad.addColorStop(0, style.color);
+        grad.addColorStop(1, style.color2);
+        context.fillStyle = grad;
+      }
     } else {
       context.fillStyle = style.color;
     }
@@ -1471,8 +1484,15 @@
     bindColor(prefix + "Color2Picker", (v) => { st().color2 = v; });
     bindCheck(prefix + "GradientCheck", (v) => {
       st().gradient = v;
+      const dirWrap = document.getElementById(prefix + "GradientDirWrap");
+      if (dirWrap) dirWrap.classList.toggle("hidden", !v);
       const el = document.getElementById(prefix + "Color2Picker");
-      if (el) el.classList.toggle("hidden", !v);
+      if (el) el.classList.toggle("hidden", !v || st().gradientDirection === "fadeDown");
+    });
+    bindSelect(prefix + "GradientDirSelect", (v) => {
+      st().gradientDirection = v;
+      const el = document.getElementById(prefix + "Color2Picker");
+      if (el) el.classList.toggle("hidden", !st().gradient || v === "fadeDown");
     });
     bindRange(prefix + "OpacityRange", prefix + "OpacityValue", (v) => { st().opacity = v / 100; }, (v) => v + "%");
 
@@ -1503,8 +1523,11 @@
     setColor(prefix + "ColorPicker", s.color);
     setColor(prefix + "Color2Picker", s.color2);
     set(prefix + "GradientCheck", "checked", !!s.gradient);
+    set(prefix + "GradientDirSelect", "value", s.gradientDirection || "horizontal");
+    const dirWrapEl = document.getElementById(prefix + "GradientDirWrap");
+    if (dirWrapEl) dirWrapEl.classList.toggle("hidden", !s.gradient);
     const color2El = document.getElementById(prefix + "Color2Picker");
-    if (color2El) color2El.classList.toggle("hidden", !s.gradient);
+    if (color2El) color2El.classList.toggle("hidden", !s.gradient || s.gradientDirection === "fadeDown");
     setColor(prefix + "OutlineColor", s.outlineColor);
     setColor(prefix + "GlowColor", s.glowColor);
     setColor(prefix + "PlateColor", s.plateColor);
@@ -1850,7 +1873,7 @@
   function styleJson(s) {
     return {
       fontKey: s.fontKey, bold: s.bold, italic: s.italic, size: s.size,
-      color: s.color, gradient: s.gradient, color2: s.color2, opacity: s.opacity, x: s.x, y: s.y,
+      color: s.color, gradient: s.gradient, gradientDirection: s.gradientDirection || "horizontal", color2: s.color2, opacity: s.opacity, x: s.x, y: s.y,
       stretchX: s.stretchX, stretchY: s.stretchY, rotation: s.rotation || 0, tracking: s.tracking,
       outlineWidth: s.outlineWidth, outlineColor: s.outlineColor,
       glowWidth: s.glowWidth, glowColor: s.glowColor,

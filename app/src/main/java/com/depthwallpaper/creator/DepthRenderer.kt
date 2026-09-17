@@ -143,7 +143,9 @@ object DepthRenderer {
         "diosaRubia" to Pair("fonts/DiosaRubia-Light.ttf", null),
         "tightenCaps" to Pair("fonts/TightenCaps-ExtraLight.otf", null),
         "skyscraper" to Pair("fonts/Skyscraper-Condensed.ttf", null),
-        "sensationalSans" to Pair("fonts/SensationalSans-Light.ttf", null)
+        "sensationalSans" to Pair("fonts/SensationalSans-Light.ttf", null),
+        // ATTENZIONE: file demo (uso personale) - vedi nota di licenza in style.css.
+        "calcio" to Pair("fonts/Calcio-Demo.ttf", null)
     )
 
     private var assetManager: AssetManager? = null
@@ -347,13 +349,32 @@ object DepthRenderer {
         fill.color = parseColor(style.color, Color.WHITE)
         fill.alpha = (alpha * 255).toInt()
         if (style.gradient && maxLineWidth > 0f) {
-            val half = maxLineWidth / 2f
-            fill.shader = LinearGradient(
-                -half, 0f, half, 0f,
-                parseColor(style.color, Color.WHITE),
-                parseColor(style.color2, Color.WHITE),
-                Shader.TileMode.CLAMP
-            )
+            val dir = style.gradientDirection
+            if (dir == "vertical" || dir == "fadeDown") {
+                val top = firstY - lineHeight / 2f
+                val bottom = firstY + (lines.size - 1) * lineHeight + lineHeight / 2f
+                val startColor = parseColor(style.color, Color.WHITE)
+                // "fadeDown": stesso colore ma alpha 0 in fondo, cosi' il testo
+                // dissolve nello sfondo invece di passare a un secondo colore.
+                val endColor = if (dir == "fadeDown") {
+                    startColor and 0x00FFFFFF
+                } else {
+                    parseColor(style.color2, Color.WHITE)
+                }
+                fill.shader = LinearGradient(
+                    0f, top, 0f, bottom,
+                    startColor, endColor,
+                    Shader.TileMode.CLAMP
+                )
+            } else {
+                val half = maxLineWidth / 2f
+                fill.shader = LinearGradient(
+                    -half, 0f, half, 0f,
+                    parseColor(style.color, Color.WHITE),
+                    parseColor(style.color2, Color.WHITE),
+                    Shader.TileMode.CLAMP
+                )
+            }
         }
         drawLines(canvas, fill, lines, firstY, lineHeight, tracking)
 

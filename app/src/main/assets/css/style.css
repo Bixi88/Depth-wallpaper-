@@ -113,6 +113,16 @@
   font-style: normal;
   font-display: block;
 }
+/* --- ATTENZIONE: versione DEMO (uso personale/anteprima), non licenza commerciale.
+   Prima di pubblicare l'app sostituire il file con la versione completa acquistata
+   da Graphicfresh (font "Calcio"), altrimenti si rischia la violazione di licenza. --- */
+@font-face {
+  font-family: "Calcio";
+  src: url("../fonts/Calcio-Demo.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
 
 :root {
   --bg-0: #000000;
