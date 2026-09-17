@@ -282,6 +282,10 @@ html, body {
 }
 #emptyState.hidden { display: none; }
 
+/* Regola generica: copre tutti gli elementi (es. .field-group) nascosti via
+   JS con classList.toggle("hidden", ...), non solo i casi specifici sopra. */
+.hidden { display: none !important; }
+
 #dragHint {
   margin: 10px 0 0;
   font-size: 12px;
