@@ -354,19 +354,42 @@ object DepthRenderer {
                 val top = firstY - lineHeight / 2f
                 val bottom = firstY + (lines.size - 1) * lineHeight + lineHeight / 2f
                 val startColor = parseColor(style.color, Color.WHITE)
-                // "fadeDown": stesso colore, ma con l'alpha finale scelta dall'utente
-                // (gradientFadeOpacity, 0 = trasparenza totale, 1 = nessuna dissolvenza).
-                val endColor = if (dir == "fadeDown") {
-                    val endAlpha = (style.gradientFadeOpacity.coerceIn(0f, 1f) * 255).toInt()
-                    (startColor and 0x00FFFFFF) or (endAlpha shl 24)
+                if (dir == "fadeDown") {
+                    // "fadeDown": la trasparenza cresce dall'alto verso il basso.
+                    // gradientFadeOpacity (0..1) e' la quantita' di trasparenza voluta:
+                    //  - 0 => dissolvenza minima, il testo resta quasi del tutto opaco;
+                    //  - 1 => la meta' inferiore del testo e' completamente trasparente.
+                    // Resta sempre un'unica sfumatura continua, senza stacchi netti.
+                    val t = style.gradientFadeOpacity.coerceIn(0f, 1f)
+                    val fadeTop = (1f - t).coerceIn(0f, 1f)
+                    var fadeBottom = (1f - t * 0.5f).coerceIn(0f, 1f)
+                    if (fadeBottom <= fadeTop) fadeBottom = (fadeTop + 0.001f).coerceAtMost(1f)
+                    val transparentColor = startColor and 0x00FFFFFF
+                    val positions = mutableListOf(0f)
+                    val colors = mutableListOf(startColor)
+                    if (fadeTop > 0f) {
+                        positions.add(fadeTop)
+                        colors.add(startColor)
+                    }
+                    positions.add(fadeBottom)
+                    colors.add(transparentColor)
+                    if (fadeBottom < 1f) {
+                        positions.add(1f)
+                        colors.add(transparentColor)
+                    }
+                    fill.shader = LinearGradient(
+                        0f, top, 0f, bottom,
+                        colors.toIntArray(), positions.toFloatArray(),
+                        Shader.TileMode.CLAMP
+                    )
                 } else {
-                    parseColor(style.color2, Color.WHITE)
+                    val endColor = parseColor(style.color2, Color.WHITE)
+                    fill.shader = LinearGradient(
+                        0f, top, 0f, bottom,
+                        startColor, endColor,
+                        Shader.TileMode.CLAMP
+                    )
                 }
-                fill.shader = LinearGradient(
-                    0f, top, 0f, bottom,
-                    startColor, endColor,
-                    Shader.TileMode.CLAMP
-                )
             } else {
                 val half = maxLineWidth / 2f
                 fill.shader = LinearGradient(

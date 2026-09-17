@@ -15,7 +15,7 @@ data class TextLayerConfig(
     val color: String,      // "#rrggbb"
     val gradient: Boolean,  // true = riempimento testo sfumato
     val gradientDirection: String, // "horizontal" | "vertical" | "fadeDown"
-    val gradientFadeOpacity: Float, // 0..1, opacita' residua in fondo quando direction = "fadeDown"
+    val gradientFadeOpacity: Float, // 0..1, quantita' di trasparenza in fondo quando direction = "fadeDown" (0 = minima, 1 = meta' inferiore trasparente)
     val color2: String,     // "#rrggbb", usato solo se gradient = true e direction != fadeDown
     val opacity: Float,     // 0..1
     val x: Float,           // 0..1

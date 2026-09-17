@@ -84,7 +84,7 @@
       color: "#ffffff",
       gradient: false,
       gradientDirection: "horizontal", // "horizontal" | "vertical" | "fadeDown"
-      gradientFadeOpacity: 0, // 0..1, opacita' residua in fondo quando direction = "fadeDown"
+      gradientFadeOpacity: 0, // 0..1, quantita' di trasparenza in fondo quando direction = "fadeDown" (0 = minima, 1 = meta' inferiore trasparente)
       color2: "#ffc531",
       opacity: 1,
       x: 0.5,
@@ -298,6 +298,25 @@
     return `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${alpha})`;
   }
 
+  /**
+   * Aggiunge gli stop di colore per la dissolvenza "fadeDown" su un gradiente
+   * verticale gia' creato (posizione 0 = cima del testo, 1 = fondo).
+   * "amount" (0..1) e' la quantita' di trasparenza voluta in fondo:
+   *  - 0   => dissolvenza minima, il testo resta quasi del tutto opaco;
+   *  - 1   => la meta' inferiore del testo e' completamente trasparente.
+   * In ogni caso resta un'unica sfumatura continua, senza stacchi netti.
+   */
+  function addFadeDownStops(grad, color, amount) {
+    const t = Math.max(0, Math.min(1, amount));
+    let fadeTop = Math.max(0, Math.min(1, 1 - t));       // dove l'alpha inizia a scendere da 1
+    let fadeBottom = Math.max(0, Math.min(1, 1 - t * 0.5)); // dove l'alpha arriva a 0
+    if (fadeBottom <= fadeTop) fadeBottom = Math.min(1, fadeTop + 0.001);
+    grad.addColorStop(0, color);
+    if (fadeTop > 0) grad.addColorStop(fadeTop, color);
+    grad.addColorStop(fadeBottom, hexToRgba(color, 0));
+    if (fadeBottom < 1) grad.addColorStop(1, hexToRgba(color, 0));
+  }
+
   /** Disegna un livello di testo e restituisce il riquadro occupato (frazioni 0..1). */
   function drawTextLayer(context, w, h, style, text, multiline) {
     if (!text) return null;
@@ -405,8 +424,12 @@
         const top = firstY - lineHeight / 2;
         const bottom = firstY + (lines.length - 1) * lineHeight + lineHeight / 2;
         const grad = context.createLinearGradient(0, top, 0, bottom);
-        grad.addColorStop(0, style.color);
-        grad.addColorStop(1, dir === "fadeDown" ? hexToRgba(style.color, style.gradientFadeOpacity || 0) : style.color2);
+        if (dir === "fadeDown") {
+          addFadeDownStops(grad, style.color, style.gradientFadeOpacity || 0);
+        } else {
+          grad.addColorStop(0, style.color);
+          grad.addColorStop(1, style.color2);
+        }
         context.fillStyle = grad;
       } else {
         const grad = context.createLinearGradient(-maxW / 2, 0, maxW / 2, 0);
