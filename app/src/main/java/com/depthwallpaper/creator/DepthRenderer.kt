@@ -8,6 +8,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -218,10 +219,10 @@ object DepthRenderer {
         multiline: Boolean
     ) {
         if (text.isEmpty()) return
-        val sizePx = style.size * k
+        var sizePx = style.size * k
         if (sizePx <= 0f) return
 
-        val tracking = style.tracking * k
+        var tracking = style.tracking * k
         val sx = if (style.stretchX <= 0f) 1f else style.stretchX
         val sy = if (style.stretchY <= 0f) 1f else style.stretchY
         val alpha = style.opacity.coerceIn(0f, 1f)
@@ -229,6 +230,24 @@ object DepthRenderer {
         val base = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
         base.typeface = typefaceFor(style.fontKey, style.bold, style.italic)
         base.textSize = sizePx
+
+        // Adattamento automatico su una riga (specchio della stessa logica nell'editor
+        // in assets/js/app.js): il motore di testo di Android puo' misurare lo stesso
+        // font a parita' di "size" con una larghezza diversa da quella di WebView. Se il
+        // testo naturale sfora il canvas lo restringiamo qui in proporzione, cosi' il
+        // risultato reale sul dispositivo resta coerente con l'anteprima dell'editor.
+        var effK = k
+        if (!multiline) {
+            val naturalW = measureTracked(base, text, tracking) * sx
+            val maxAllowed = w * 0.94f
+            if (naturalW > maxAllowed && naturalW > 0f) {
+                val fit = maxAllowed / naturalW
+                sizePx *= fit
+                tracking *= fit
+                effK *= fit
+                base.textSize = sizePx
+            }
+        }
 
         val lines: List<String> = if (multiline) {
             wrapLines(base, text, (w * 0.92f) / sx, tracking)
@@ -266,7 +285,7 @@ object DepthRenderer {
             platePaint.alpha = (style.plateOpacity.coerceIn(0f, 1f) * alpha * 255).toInt()
             if (shadowPending) {
                 platePaint.setShadowLayer(
-                    style.shadowBlur * k, 0f, style.shadowOffsetY * k,
+                    style.shadowBlur * effK, 0f, style.shadowOffsetY * effK,
                     Color.argb((style.shadowOpacity.coerceIn(0f, 1f) * 255).toInt(), 0, 0, 0)
                 )
                 shadowPending = false
@@ -276,41 +295,53 @@ object DepthRenderer {
 
         // --- alone morbido ---
         if (style.glowWidth > 0f) {
+            val glowPath = buildTrackedPath(base, lines, firstY, lineHeight, tracking)
             val glow = Paint(base)
             glow.style = Paint.Style.STROKE
             glow.strokeJoin = Paint.Join.ROUND
             glow.strokeCap = Paint.Cap.ROUND
-            glow.strokeWidth = style.glowWidth * k * 2f
+            glow.strokeWidth = style.glowWidth * effK * 2f
             glow.color = parseColor(style.glowColor, Color.BLACK)
             glow.alpha = (alpha * 255).toInt()
             try {
-                glow.maskFilter = BlurMaskFilter(maxOf(1f, style.glowWidth * k), BlurMaskFilter.Blur.NORMAL)
+                glow.maskFilter = BlurMaskFilter(maxOf(1f, style.glowWidth * effK), BlurMaskFilter.Blur.NORMAL)
             } catch (e: Throwable) {
                 // dispositivi senza supporto: resta un contorno netto
             }
-            drawLines(canvas, glow, lines, firstY, lineHeight, tracking)
+            canvas.drawPath(glowPath, glow)
         }
 
         // --- contorno netto ---
         if (style.outlineWidth > 0f) {
+            if (shadowPending) {
+                drawUnifiedShadow(
+                    canvas, base, lines, firstY, lineHeight, tracking,
+                    Paint.Style.STROKE, style.outlineWidth * effK * 2f,
+                    Color.argb((style.shadowOpacity.coerceIn(0f, 1f) * 255).toInt(), 0, 0, 0),
+                    style.shadowBlur * effK, style.shadowOffsetY * effK
+                )
+                shadowPending = false
+            }
             val outline = Paint(base)
             outline.style = Paint.Style.STROKE
             outline.strokeJoin = Paint.Join.ROUND
             outline.strokeCap = Paint.Cap.ROUND
-            outline.strokeWidth = style.outlineWidth * k * 2f
+            outline.strokeWidth = style.outlineWidth * effK * 2f
             outline.color = parseColor(style.outlineColor, Color.BLACK)
             outline.alpha = (alpha * 255).toInt()
-            if (shadowPending) {
-                outline.setShadowLayer(
-                    style.shadowBlur * k, 0f, style.shadowOffsetY * k,
-                    Color.argb((style.shadowOpacity.coerceIn(0f, 1f) * 255).toInt(), 0, 0, 0)
-                )
-                shadowPending = false
-            }
             drawLines(canvas, outline, lines, firstY, lineHeight, tracking)
         }
 
         // --- riempimento ---
+        if (shadowPending) {
+            drawUnifiedShadow(
+                canvas, base, lines, firstY, lineHeight, tracking,
+                Paint.Style.FILL, 0f,
+                Color.argb((style.shadowOpacity.coerceIn(0f, 1f) * 255).toInt(), 0, 0, 0),
+                style.shadowBlur * effK, style.shadowOffsetY * effK
+            )
+            shadowPending = false
+        }
         val fill = Paint(base)
         fill.style = Paint.Style.FILL
         fill.color = parseColor(style.color, Color.WHITE)
@@ -322,12 +353,6 @@ object DepthRenderer {
                 parseColor(style.color, Color.WHITE),
                 parseColor(style.color2, Color.WHITE),
                 Shader.TileMode.CLAMP
-            )
-        }
-        if (shadowPending) {
-            fill.setShadowLayer(
-                style.shadowBlur * k, 0f, style.shadowOffsetY * k,
-                Color.argb((style.shadowOpacity.coerceIn(0f, 1f) * 255).toInt(), 0, 0, 0)
             )
         }
         drawLines(canvas, fill, lines, firstY, lineHeight, tracking)
@@ -378,6 +403,61 @@ object DepthRenderer {
         return total + tracking * (text.length - 1)
     }
 
+    /** Sagoma UNICA (tutte le righe/lettere unite in un solo Path) del testo con
+     *  spaziatura: serve a proiettare l'ombra/alone in un solo colpo invece che
+     *  lettera per lettera, perche' con la spaziatura attiva l'ombra per-carattere
+     *  si sovrapponeva tra le lettere sommandosi e creando un alone molto piu'
+     *  grande e visibile del previsto (specie evidente con il riempimento a
+     *  gradiente). Specchio di buildTrackedPath in assets/js/app.js. */
+    private fun buildTrackedPath(paint: Paint, lines: List<String>, firstY: Float, lineHeight: Float, tracking: Float): Path {
+        val path = Path()
+        var y = firstY
+        val metrics = paint.fontMetrics
+        for (line in lines) {
+            val baselineY = y - (metrics.ascent + metrics.descent) / 2f
+            if (tracking == 0f) {
+                paint.textAlign = Paint.Align.CENTER
+                val glyphPath = Path()
+                paint.getTextPath(line, 0, line.length, 0f, baselineY, glyphPath)
+                path.addPath(glyphPath)
+            } else {
+                paint.textAlign = Paint.Align.LEFT
+                var x = -measureTracked(paint, line, tracking) / 2f
+                for (ch in line) {
+                    val s = ch.toString()
+                    val chPath = Path()
+                    paint.getTextPath(s, 0, s.length, x, baselineY, chPath)
+                    path.addPath(chPath)
+                    x += paint.measureText(s) + tracking
+                }
+            }
+            y += lineHeight
+        }
+        return path
+    }
+
+    /** Proietta un'ombra unica dietro a tutta la scritta: disegna la sagoma unita
+     *  con una sorgente quasi invisibile e l'ombra attiva, cosi' resta visibile
+     *  solo l'ombra sfocata (non la forma stessa). */
+    private fun drawUnifiedShadow(
+        canvas: Canvas, base: Paint, lines: List<String>, firstY: Float, lineHeight: Float,
+        tracking: Float, style: Paint.Style, strokeWidth: Float,
+        shadowColor: Int, shadowBlur: Float, shadowOffsetY: Float
+    ) {
+        val path = buildTrackedPath(base, lines, firstY, lineHeight, tracking)
+        val paint = Paint(base)
+        paint.style = style
+        if (style == Paint.Style.STROKE) {
+            paint.strokeWidth = strokeWidth
+            paint.strokeJoin = Paint.Join.ROUND
+            paint.strokeCap = Paint.Cap.ROUND
+        }
+        paint.color = Color.BLACK
+        paint.alpha = 1 // sorgente quasi invisibile: serve solo a proiettare l'ombra
+        paint.setShadowLayer(shadowBlur, 0f, shadowOffsetY, shadowColor)
+        canvas.drawPath(path, paint)
+    }
+
     private fun wrapLines(paint: Paint, text: String, maxWidth: Float, tracking: Float): List<String> {
         val result = mutableListOf<String>()
         for (rawLine in text.split("\n")) {
@@ -402,13 +482,13 @@ object DepthRenderer {
     // -------------------------------------------------------------------------------
     private fun clockText(clock: ClockConfig): String {
         if (clock.mode == "custom") return clock.customText.ifBlank { "Il tuo testo" }
-        // Niente ":" tra ore e minuti: erano i "puntini centrali" che l'utente
-        // non vuole piu' vedere nell'orologio (deve restare identico all'editor).
+        // Ore e minuti attaccati, senza alcun separatore (deve restare
+        // identico all'editor in assets/js/app.js).
         val pattern = when (clock.format) {
-            "24short" -> "H mm"
-            "12" -> "h mm"
-            "12ampm" -> "h mm a"
-            else -> "HH mm"
+            "24short" -> "Hmm"
+            "12" -> "hmm"
+            "12ampm" -> "hmm a"
+            else -> "HHmm"
         }
         return try {
             SimpleDateFormat(pattern, Locale.getDefault()).format(Date())

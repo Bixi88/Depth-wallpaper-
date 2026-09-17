@@ -153,13 +153,12 @@
     const h = now.getHours();
     const m = now.getMinutes();
     const h12 = h % 12 === 0 ? 12 : h % 12;
-    // Niente ":" tra ore e minuti: erano i "puntini centrali" che l'utente
-    // non vuole piu' vedere nell'orologio.
+    // Ore e minuti attaccati, senza alcun separatore (ne' ":" ne' spazio).
     switch (c.format) {
-      case "24short": return h + " " + pad2(m);
-      case "12": return h12 + " " + pad2(m);
-      case "12ampm": return h12 + " " + pad2(m) + (h < 12 ? " AM" : " PM");
-      default: return pad2(h) + " " + pad2(m);
+      case "24short": return h + pad2(m);
+      case "12": return h12 + pad2(m);
+      case "12ampm": return h12 + pad2(m) + (h < 12 ? " AM" : " PM");
+      default: return pad2(h) + pad2(m);
     }
   }
 
@@ -235,6 +234,44 @@
     context.shadowOffsetY = 0;
   }
 
+  /** Proietta un'ombra/alone UNICO dietro a tutta la scritta (anche su piu'
+   *  caratteri con spaziatura lettere attiva), invece di farlo carattere per
+   *  carattere: con la spaziatura attiva, l'ombra per-carattere si sovrapponeva
+   *  tra una lettera e l'altra, sommandosi e creando un alone molto piu' grande
+   *  e visibile del previsto (specie evidente con il riempimento a gradiente).
+   *  Disegna prima la sagoma (piena, bianca, senza sfocatura) su un canvas
+   *  separato, poi la ridisegna una sola volta sul contesto principale con
+   *  l'ombra attiva e sorgente resa quasi invisibile: cosi' resta solo l'ombra. */
+  function drawUnifiedShadow(context, lines, firstY, lineHeight, tracking, maxW, mode, strokeWidth, shadowColor, shadowBlur, shadowOffsetY) {
+    if (maxW <= 0) return;
+    const pad = Math.ceil(strokeWidth + Math.abs(shadowBlur) + Math.abs(shadowOffsetY) + 6);
+    const totalH = lines.length * lineHeight;
+    const cw = Math.max(1, Math.ceil(maxW + pad * 2));
+    const chh = Math.max(1, Math.ceil(totalH + pad * 2));
+    const off = document.createElement("canvas");
+    off.width = cw;
+    off.height = chh;
+    const octx = off.getContext("2d");
+    octx.font = context.font;
+    octx.textBaseline = "middle";
+    octx.lineJoin = "round";
+    octx.lineCap = "round";
+    octx.fillStyle = "#fff";
+    octx.strokeStyle = "#fff";
+    if (strokeWidth > 0) octx.lineWidth = strokeWidth;
+    octx.translate(cw / 2, totalH / 2 + pad);
+    drawLines(octx, lines, firstY, lineHeight, tracking, mode);
+
+    context.save();
+    context.shadowColor = shadowColor;
+    context.shadowBlur = shadowBlur;
+    context.shadowOffsetX = 0;
+    context.shadowOffsetY = shadowOffsetY;
+    context.globalAlpha = 0.004; // sorgente quasi invisibile: resta solo l'ombra proiettata
+    context.drawImage(off, -cw / 2, -totalH / 2 - pad);
+    context.restore();
+  }
+
   function roundRectPath(context, x, y, w, h, r) {
     if (context.roundRect) {
       context.beginPath();
@@ -261,12 +298,12 @@
   function drawTextLayer(context, w, h, style, text, multiline) {
     if (!text) return null;
     const k = w / CANVAS_W;
-    const size = style.size * k;
+    let size = style.size * k;
     if (size <= 0) return null;
 
     const sx = style.stretchX > 0 ? style.stretchX : 1;
     const sy = style.stretchY > 0 ? style.stretchY : 1;
-    const tracking = style.tracking * k;
+    let tracking = style.tracking * k;
     const alpha = Math.max(0, Math.min(1, style.opacity));
 
     context.save();
@@ -277,6 +314,25 @@
     const weight = style.bold ? "700" : "400";
     const italic = style.italic ? "italic " : "";
     context.font = `${italic}${weight} ${size}px ${fontCss(style.fontKey)}`;
+
+    // Adattamento automatico su una riga (orologio in modalita' "ora", data): i
+    // motori di testo di WebView e di Android nativo possono misurare lo stesso
+    // font a parita' di "size" con larghezze diverse. Se il testo naturale sfora
+    // il canvas lo restringiamo qui in proporzione, cosi' l'anteprima nell'editor
+    // e il risultato reale sul dispositivo restano sempre coerenti, qualunque sia
+    // il font scelto.
+    let effK = k;
+    if (!multiline) {
+      const naturalW = measureTracked(context, String(text), tracking) * sx;
+      const maxAllowed = w * 0.94;
+      if (naturalW > maxAllowed && naturalW > 0) {
+        const fit = maxAllowed / naturalW;
+        size *= fit;
+        tracking *= fit;
+        effK *= fit;
+        context.font = `${italic}${weight} ${size}px ${fontCss(style.fontKey)}`;
+      }
+    }
 
     context.translate(style.x * w, style.y * h);
     if (style.rotation) context.rotate((style.rotation * Math.PI) / 180);
@@ -293,9 +349,9 @@
     function applyShadowIfPending() {
       if (!shadowPending) { clearShadow(context); return; }
       context.shadowColor = `rgba(0,0,0,${style.shadowOpacity})`;
-      context.shadowBlur = style.shadowBlur * k;
+      context.shadowBlur = style.shadowBlur * effK;
       context.shadowOffsetX = 0;
-      context.shadowOffsetY = style.shadowOffsetY * k;
+      context.shadowOffsetY = style.shadowOffsetY * effK;
       shadowPending = false;
     }
 
@@ -316,28 +372,29 @@
 
     // --- alone morbido ---
     if (style.glowWidth > 0) {
-      const gw = style.glowWidth * k;
+      const gw = style.glowWidth * effK;
+      drawUnifiedShadow(context, lines, firstY, lineHeight, tracking, maxW, "stroke", gw * 2, style.glowColor, gw * 1.6, 0);
       context.strokeStyle = style.glowColor;
       context.lineWidth = gw * 2;
-      context.shadowColor = style.glowColor;
-      context.shadowBlur = gw * 1.6;
-      context.shadowOffsetX = 0;
-      context.shadowOffsetY = 0;
       drawLines(context, lines, firstY, lineHeight, tracking, "stroke");
-      clearShadow(context);
     }
 
     // --- contorno netto ---
     if (style.outlineWidth > 0) {
-      applyShadowIfPending();
+      if (shadowPending) {
+        drawUnifiedShadow(context, lines, firstY, lineHeight, tracking, maxW, "stroke", style.outlineWidth * effK * 2, `rgba(0,0,0,${style.shadowOpacity})`, style.shadowBlur * effK, style.shadowOffsetY * effK);
+        shadowPending = false;
+      }
       context.strokeStyle = style.outlineColor;
-      context.lineWidth = style.outlineWidth * k * 2;
+      context.lineWidth = style.outlineWidth * effK * 2;
       drawLines(context, lines, firstY, lineHeight, tracking, "stroke");
-      clearShadow(context);
     }
 
     // --- riempimento ---
-    applyShadowIfPending();
+    if (shadowPending) {
+      drawUnifiedShadow(context, lines, firstY, lineHeight, tracking, maxW, "fill", 0, `rgba(0,0,0,${style.shadowOpacity})`, style.shadowBlur * effK, style.shadowOffsetY * effK);
+      shadowPending = false;
+    }
     if (style.gradient && maxW > 0) {
       const grad = context.createLinearGradient(-maxW / 2, 0, maxW / 2, 0);
       grad.addColorStop(0, style.color);
@@ -684,6 +741,7 @@
     sheet.className = "color-popover";
     sheet.innerHTML = `
       <div class="color-popover-preview" id="cpPreview"></div>
+      <button type="button" class="upload-btn ghost cp-eyedrop-btn" id="cpEyedropBtn">${EYEDROP_ICON} Preleva colore dalla foto</button>
       <div class="color-popover-row">
         <label>Tonalit&agrave;</label>
         <input type="range" id="cpHue" min="0" max="360" step="1" />
@@ -746,6 +804,18 @@
     });
     sheet.querySelector("#cpDoneBtn").addEventListener("click", closeColorPopover);
     backdrop.addEventListener("click", (e) => { if (e.target === backdrop) closeColorPopover(); });
+
+    const eyedropBtn = sheet.querySelector("#cpEyedropBtn");
+    if (eyedropBtn) {
+      eyedropBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        closeColorPopover();
+        startEyedrop((hex) => {
+          setColorValue(anchorEl, hex);
+          onChange(hex);
+        });
+      });
+    }
 
     refresh(false);
 
@@ -852,6 +922,7 @@
     cutoutMaskedSubjectCanvas = null;
     cutoutMaskOffsetPx = 0;
     cutoutOutlineWidthPx = 0;
+    cutoutSmoothPx = 3;
   }
 
   document.getElementById("btnRemoveFg").addEventListener("click", () => {
@@ -911,6 +982,7 @@
   // entrambi a 0 all'apertura dell'editor, come richiesto ("sempre inizialmente centrale").
   let cutoutMaskOffsetPx = 0;
   let cutoutOutlineWidthPx = 0;
+  let cutoutSmoothPx = 3;
 
   // Zoom/pan del canvas di ritaglio (pizzico con due dita) e mirino di precisione
   // per il pennello: vedi sezione dedicata piu' sotto.
@@ -973,8 +1045,10 @@
 
       cutoutMaskOffsetPx = 0;
       cutoutOutlineWidthPx = 0;
+      cutoutSmoothPx = 3;
       setSlider("cutoutOffsetRange", 0);
       setSlider("cutoutOutlineRange", 0);
+      setSlider("cutoutSmoothRange", 3);
       resetCutoutView();
 
       cutoutModal.classList.remove("hidden");
@@ -997,6 +1071,7 @@
     cutoutCanvas.height = cutoutSourceCanvas.height;
     setSlider("cutoutOffsetRange", cutoutMaskOffsetPx);
     setSlider("cutoutOutlineRange", cutoutOutlineWidthPx);
+    setSlider("cutoutSmoothRange", cutoutSmoothPx);
     resetCutoutView();
     cutoutModal.classList.remove("hidden");
     renderCutoutPreview();
@@ -1076,6 +1151,23 @@
     return outCanvas;
   }
 
+  /** Sfuma i bordi (gia' erosi/dilatati, quindi tipicamente "a scalini") di una
+   *  maschera alpha: l'erosione/dilatazione usa un kernel quadrato (per essere
+   *  veloce), quindi a raggi grandi i contorni escono un po' "a blocchi". Un
+   *  leggero blur post-elaborazione li arrotonda senza dover rifare il filtro
+   *  con un kernel circolare, molto piu' lento. */
+  function smoothAlphaMask(maskCanvas, blurPx) {
+    if (blurPx <= 0) return maskCanvas;
+    const out = document.createElement("canvas");
+    out.width = maskCanvas.width;
+    out.height = maskCanvas.height;
+    const octx = out.getContext("2d");
+    octx.filter = `blur(${blurPx}px)`;
+    octx.drawImage(maskCanvas, 0, 0);
+    octx.filter = "none";
+    return out;
+  }
+
   /** Foto ritagliata con la maschera effettiva applicata, su un canvas riusato
    *  per non riallocarne uno nuovo a ogni frame durante il disegno col pennello. */
   function buildMaskedSubject(effectiveMask) {
@@ -1120,12 +1212,14 @@
   function renderCutoutPreview() {
     cutoutCtx.clearRect(0, 0, cutoutCanvas.width, cutoutCanvas.height);
 
-    const effectiveMask = cutoutMaskOffsetPx
+    let effectiveMask = cutoutMaskOffsetPx
       ? erodeDilateAlpha(cutoutMaskCanvas, cutoutMaskOffsetPx)
       : cutoutMaskCanvas;
+    if (cutoutSmoothPx > 0) effectiveMask = smoothAlphaMask(effectiveMask, cutoutSmoothPx);
 
     if (cutoutOutlineWidthPx > 0) {
-      const outlineMask = erodeDilateAlpha(effectiveMask, cutoutOutlineWidthPx);
+      let outlineMask = erodeDilateAlpha(effectiveMask, cutoutOutlineWidthPx);
+      if (cutoutSmoothPx > 0) outlineMask = smoothAlphaMask(outlineMask, cutoutSmoothPx);
       cutoutCtx.fillStyle = "#ffffff";
       cutoutCtx.fillRect(0, 0, cutoutCanvas.width, cutoutCanvas.height);
       cutoutCtx.globalCompositeOperation = "destination-in";
@@ -1297,6 +1391,11 @@
   bindRange(
     "cutoutOutlineRange", "cutoutOutlineValue",
     (v) => { cutoutOutlineWidthPx = v; scheduleCutoutRender(); },
+    (v) => v + " px"
+  );
+  bindRange(
+    "cutoutSmoothRange", "cutoutSmoothValue",
+    (v) => { cutoutSmoothPx = v; scheduleCutoutRender(); },
     (v) => v + " px"
   );
 
@@ -1629,19 +1728,17 @@
     }
   }
 
-  function startEyedrop(input, btn) {
+  function startEyedrop(onCommit) {
     if (!state.bg.img) { showToast("Carica prima una foto"); return; }
     stopEyedrop();
     eyedropCanvas = buildEyedropSource();
-    eyedrop = { input: input, btn: btn };
-    btn.classList.add("armed");
+    eyedrop = { onCommit: onCommit };
     eyedropOverlay.classList.remove("hidden");
     eyedropBubble.classList.remove("show");
     dragHint.style.opacity = "0";
   }
 
   function stopEyedrop() {
-    if (eyedrop) eyedrop.btn.classList.remove("armed");
     eyedrop = null;
     eyedropCanvas = null;
     eyedropPicking = false;
@@ -1659,14 +1756,12 @@
     eyedropHex.textContent = hex.toUpperCase();
   }
 
-  /** Applica il colore al campo che ha avviato il prelievo. L'evento "input"
-   *  riusa esattamente la stessa strada di una scelta manuale nel selettore. */
+  /** Applica il colore al campo che ha avviato il prelievo. */
   function commitEyedrop(hex) {
     if (!eyedrop || !hex) { stopEyedrop(); return; }
-    const input = eyedrop.input;
-    input.value = hex;
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const onCommit = eyedrop.onCommit;
     stopEyedrop();
+    onCommit(hex);
     showToast("Colore copiato: " + hex.toUpperCase());
   }
 
@@ -1675,28 +1770,8 @@
     '<path d="M16.5 3.5a2.4 2.4 0 013.4 3.4l-1.9 1.9 1 1-1.6 1.6-1-1L8.6 18H5.5v-3.1l8.6-8.6-1-1L14.7 3.7l1 1z" />' +
     "</svg>";
 
-  document.querySelectorAll('input[type="color"]').forEach((input) => {
-    const row = document.createElement("div");
-    row.className = "color-row";
-    input.parentNode.insertBefore(row, input);
-    row.appendChild(input);
-
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "eyedrop-btn";
-    btn.title = "Copia un colore dalla foto";
-    btn.innerHTML = EYEDROP_ICON;
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (eyedrop && eyedrop.input === input) stopEyedrop();
-      else startEyedrop(input, btn);
-    });
-    row.appendChild(btn);
-  });
-
   // Cambiando scheda il prelievo in corso si annulla: la pipetta resterebbe
-  // armata su un campo non piu' visibile.
+  // armata mentre l'utente guarda un pannello non piu' pertinente.
   document.querySelectorAll(".tab-btn").forEach((b) => b.addEventListener("click", () => { if (eyedrop) stopEyedrop(); }));
 
   // ===========================================================================

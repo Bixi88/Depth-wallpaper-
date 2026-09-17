@@ -213,14 +213,6 @@
             <label>Ombra &middot; distanza <span class="value-badge" id="clockShadowOffValue">4</span></label>
             <input type="range" id="clockShadowOffRange" min="-20" max="40" value="4" data-center="4" />
           </div>
-          <div class="field-group">
-            <label>Pannello dietro <span class="value-badge" id="clockPlateValue">0%</span></label>
-            <input type="range" id="clockPlateRange" min="0" max="100" value="0" data-center="0" />
-          </div>
-          <div class="field-group">
-            <label>Colore pannello</label>
-            <button type="button" class="color-swatch-btn" id="clockPlateColor" data-value="#000000"></button>
-          </div>
 
           <div class="field-group section-title">Posizione</div>
           <div class="field-group">
@@ -338,14 +330,6 @@
           <div class="field-group">
             <label>Ombra &middot; distanza <span class="value-badge" id="dateShadowOffValue">4</span></label>
             <input type="range" id="dateShadowOffRange" min="-20" max="40" value="4" data-center="4" />
-          </div>
-          <div class="field-group">
-            <label>Pannello dietro <span class="value-badge" id="datePlateValue">0%</span></label>
-            <input type="range" id="datePlateRange" min="0" max="100" value="0" data-center="0" />
-          </div>
-          <div class="field-group">
-            <label>Colore pannello</label>
-            <button type="button" class="color-swatch-btn" id="datePlateColor" data-value="#000000"></button>
           </div>
 
           <div class="field-group section-title">Posizione</div>
@@ -477,6 +461,11 @@
       <label>Contorno ritaglio <span class="value-badge" id="cutoutOffsetValue">0 px</span></label>
       <input type="range" id="cutoutOffsetRange" min="-20" max="20" value="0" data-center="0" />
       <p class="hint-text">A sinistra riduce il ritaglio pixel per pixel su tutto il perimetro: utile per togliere il bordino chiaro che resta quando lo sfondo originale era simile al soggetto. A destra lo allarga.</p>
+    </div>
+    <div class="field-group">
+      <label>Morbidezza bordi <span class="value-badge" id="cutoutSmoothValue">3 px</span></label>
+      <input type="range" id="cutoutSmoothRange" min="0" max="20" value="3" data-center="3" />
+      <p class="hint-text">Arrotonda i bordi "a scalini" del ritaglio e del bordo adesivo: 0 = netto (piu' pixelloso), valori alti = piu' sfumato.</p>
     </div>
     <div class="field-group">
       <label>Bordo bianco adesivo <span class="value-badge" id="cutoutOutlineValue">0 px</span></label>
