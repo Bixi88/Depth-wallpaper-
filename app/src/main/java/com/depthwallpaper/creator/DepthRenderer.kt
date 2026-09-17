@@ -354,10 +354,11 @@ object DepthRenderer {
                 val top = firstY - lineHeight / 2f
                 val bottom = firstY + (lines.size - 1) * lineHeight + lineHeight / 2f
                 val startColor = parseColor(style.color, Color.WHITE)
-                // "fadeDown": stesso colore ma alpha 0 in fondo, cosi' il testo
-                // dissolve nello sfondo invece di passare a un secondo colore.
+                // "fadeDown": stesso colore, ma con l'alpha finale scelta dall'utente
+                // (gradientFadeOpacity, 0 = trasparenza totale, 1 = nessuna dissolvenza).
                 val endColor = if (dir == "fadeDown") {
-                    startColor and 0x00FFFFFF
+                    val endAlpha = (style.gradientFadeOpacity.coerceIn(0f, 1f) * 255).toInt()
+                    (startColor and 0x00FFFFFF) or (endAlpha shl 24)
                 } else {
                     parseColor(style.color2, Color.WHITE)
                 }

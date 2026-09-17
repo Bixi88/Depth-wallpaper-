@@ -15,6 +15,7 @@ data class TextLayerConfig(
     val color: String,      // "#rrggbb"
     val gradient: Boolean,  // true = riempimento testo sfumato
     val gradientDirection: String, // "horizontal" | "vertical" | "fadeDown"
+    val gradientFadeOpacity: Float, // 0..1, opacita' residua in fondo quando direction = "fadeDown"
     val color2: String,     // "#rrggbb", usato solo se gradient = true e direction != fadeDown
     val opacity: Float,     // 0..1
     val x: Float,           // 0..1
@@ -49,6 +50,7 @@ data class TextLayerConfig(
                 color = j.optString("color", "#ffffff"),
                 gradient = j.optBoolean("gradient", false),
                 gradientDirection = j.optString("gradientDirection", "horizontal"),
+                gradientFadeOpacity = j.optDouble("gradientFadeOpacity", 0.0).toFloat(),
                 color2 = j.optString("color2", "#ffc531"),
                 opacity = j.optDouble("opacity", 1.0).toFloat(),
                 x = j.optDouble("x", 0.5).toFloat(),
@@ -71,7 +73,7 @@ data class TextLayerConfig(
 
         fun default(size: Float, y: Float, bold: Boolean) = TextLayerConfig(
             fontKey = "sans", bold = bold, italic = false, size = size,
-            color = "#ffffff", gradient = false, gradientDirection = "horizontal", color2 = "#ffc531", opacity = 1f, x = 0.5f, y = y,
+            color = "#ffffff", gradient = false, gradientDirection = "horizontal", gradientFadeOpacity = 0f, color2 = "#ffc531", opacity = 1f, x = 0.5f, y = y,
             stretchX = 1f, stretchY = 1f, rotation = 0f, tracking = 0f,
             outlineWidth = 0f, outlineColor = "#000000",
             shadowOpacity = 0.45f, shadowBlur = 10f, shadowOffsetY = 4f,

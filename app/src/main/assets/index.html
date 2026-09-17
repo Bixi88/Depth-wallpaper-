@@ -15,7 +15,7 @@
     <h1>Depth Wallpaper</h1>
     <button id="resetAllBtn" class="icon-btn" title="Ripristina tutto">&#8635;</button>
     <button id="applyLiveBtn" class="export-btn" title="Imposta come sfondo animato">
-      <span class="icon">&#9889;</span> Imposta sfondo
+      Imposta sfondo
     </button>
   </header>
 
@@ -198,6 +198,10 @@
               <option value="fadeDown">Dissolvenza verso il basso (trasparenza)</option>
             </select>
           </div>
+          <div class="field-group hidden" id="clockGradientFadeWrap">
+            <label>Opacit&agrave; in fondo <span class="value-badge" id="clockGradientFadeValue">0%</span></label>
+            <input type="range" id="clockGradientFadeRange" min="0" max="100" value="0" data-center="0" />
+          </div>
           <div class="field-group">
             <label>Opacit&agrave; <span class="value-badge" id="clockOpacityValue">100%</span></label>
             <input type="range" id="clockOpacityRange" min="0" max="100" value="100" data-center="100" />
@@ -323,6 +327,10 @@
               <option value="vertical">Verticale (2 colori)</option>
               <option value="fadeDown">Dissolvenza verso il basso (trasparenza)</option>
             </select>
+          </div>
+          <div class="field-group hidden" id="dateGradientFadeWrap">
+            <label>Opacit&agrave; in fondo <span class="value-badge" id="dateGradientFadeValue">0%</span></label>
+            <input type="range" id="dateGradientFadeRange" min="0" max="100" value="0" data-center="0" />
           </div>
           <div class="field-group">
             <label>Opacit&agrave; <span class="value-badge" id="dateOpacityValue">100%</span></label>

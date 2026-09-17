@@ -84,6 +84,7 @@
       color: "#ffffff",
       gradient: false,
       gradientDirection: "horizontal", // "horizontal" | "vertical" | "fadeDown"
+      gradientFadeOpacity: 0, // 0..1, opacita' residua in fondo quando direction = "fadeDown"
       color2: "#ffc531",
       opacity: 1,
       x: 0.5,
@@ -405,7 +406,7 @@
         const bottom = firstY + (lines.length - 1) * lineHeight + lineHeight / 2;
         const grad = context.createLinearGradient(0, top, 0, bottom);
         grad.addColorStop(0, style.color);
-        grad.addColorStop(1, dir === "fadeDown" ? hexToRgba(style.color, 0) : style.color2);
+        grad.addColorStop(1, dir === "fadeDown" ? hexToRgba(style.color, style.gradientFadeOpacity || 0) : style.color2);
         context.fillStyle = grad;
       } else {
         const grad = context.createLinearGradient(-maxW / 2, 0, maxW / 2, 0);
@@ -1482,18 +1483,19 @@
 
     bindColor(prefix + "ColorPicker", (v) => { st().color = v; });
     bindColor(prefix + "Color2Picker", (v) => { st().color2 = v; });
-    bindCheck(prefix + "GradientCheck", (v) => {
-      st().gradient = v;
+    function syncGradientVisibility() {
+      const on = !!st().gradient;
+      const dir = st().gradientDirection || "horizontal";
       const dirWrap = document.getElementById(prefix + "GradientDirWrap");
-      if (dirWrap) dirWrap.classList.toggle("hidden", !v);
-      const el = document.getElementById(prefix + "Color2Picker");
-      if (el) el.classList.toggle("hidden", !v || st().gradientDirection === "fadeDown");
-    });
-    bindSelect(prefix + "GradientDirSelect", (v) => {
-      st().gradientDirection = v;
-      const el = document.getElementById(prefix + "Color2Picker");
-      if (el) el.classList.toggle("hidden", !st().gradient || v === "fadeDown");
-    });
+      if (dirWrap) dirWrap.classList.toggle("hidden", !on);
+      const color2El = document.getElementById(prefix + "Color2Picker");
+      if (color2El) color2El.classList.toggle("hidden", !on || dir === "fadeDown");
+      const fadeWrap = document.getElementById(prefix + "GradientFadeWrap");
+      if (fadeWrap) fadeWrap.classList.toggle("hidden", !on || dir !== "fadeDown");
+    }
+    bindCheck(prefix + "GradientCheck", (v) => { st().gradient = v; syncGradientVisibility(); });
+    bindSelect(prefix + "GradientDirSelect", (v) => { st().gradientDirection = v; syncGradientVisibility(); });
+    bindRange(prefix + "GradientFadeRange", prefix + "GradientFadeValue", (v) => { st().gradientFadeOpacity = v / 100; }, (v) => v + "%");
     bindRange(prefix + "OpacityRange", prefix + "OpacityValue", (v) => { st().opacity = v / 100; }, (v) => v + "%");
 
     bindRange(prefix + "OutlineRange", prefix + "OutlineValue", (v) => { st().outlineWidth = v; });
@@ -1528,6 +1530,9 @@
     if (dirWrapEl) dirWrapEl.classList.toggle("hidden", !s.gradient);
     const color2El = document.getElementById(prefix + "Color2Picker");
     if (color2El) color2El.classList.toggle("hidden", !s.gradient || s.gradientDirection === "fadeDown");
+    const fadeWrapEl = document.getElementById(prefix + "GradientFadeWrap");
+    if (fadeWrapEl) fadeWrapEl.classList.toggle("hidden", !s.gradient || s.gradientDirection !== "fadeDown");
+    setSlider(prefix + "GradientFadeRange", Math.round((s.gradientFadeOpacity || 0) * 100));
     setColor(prefix + "OutlineColor", s.outlineColor);
     setColor(prefix + "GlowColor", s.glowColor);
     setColor(prefix + "PlateColor", s.plateColor);
@@ -1873,7 +1878,7 @@
   function styleJson(s) {
     return {
       fontKey: s.fontKey, bold: s.bold, italic: s.italic, size: s.size,
-      color: s.color, gradient: s.gradient, gradientDirection: s.gradientDirection || "horizontal", color2: s.color2, opacity: s.opacity, x: s.x, y: s.y,
+      color: s.color, gradient: s.gradient, gradientDirection: s.gradientDirection || "horizontal", gradientFadeOpacity: s.gradientFadeOpacity || 0, color2: s.color2, opacity: s.opacity, x: s.x, y: s.y,
       stretchX: s.stretchX, stretchY: s.stretchY, rotation: s.rotation || 0, tracking: s.tracking,
       outlineWidth: s.outlineWidth, outlineColor: s.outlineColor,
       glowWidth: s.glowWidth, glowColor: s.glowColor,
