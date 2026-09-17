@@ -59,6 +59,18 @@ class DepthWallpaperService : WallpaperService() {
             super.onCreate(surfaceHolder)
             // Rende disponibili al renderer i font inclusi in assets/fonts.
             DepthRenderer.attach(applicationContext)
+            // FIX posizionamento orologio/data disallineato tra anteprima editor e
+            // sfondo reale: senza questo, alcuni launcher (incluso quello di
+            // sistema, per lo scorrimento con parallasse tra le home page) chiedono
+            // una superficie di disegno piu' LARGA/ALTA dello schermo reale. Siccome
+            // orologio e data sono posizionati in percentuale rispetto alla
+            // larghezza/altezza della superficie (style.x * w, style.y * h), se la
+            // superficie e' piu' grande dello schermo finiscono spostati e con una
+            // scala diversa rispetto a quanto mostrato nell'editor, che assume
+            // sempre una corrispondenza 1:1 con lo schermo. Forzando qui la
+            // dimensione fissa della superficie alle dimensioni reali dello schermo,
+            // il risultato finale coincide sempre con l'anteprima.
+            forceScreenSizedSurface(surfaceHolder)
             try {
                 reloadConfigAndBitmaps()
                 ContextCompat.registerReceiver(
@@ -105,7 +117,39 @@ class DepthWallpaperService : WallpaperService() {
 
         override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
             super.onSurfaceChanged(holder, format, width, height)
+            // Se la superficie che arriva qui non corrisponde ancora allo schermo
+            // reale (es. il launcher l'ha appena richiesta piu' larga per la
+            // parallasse), la si corregge di nuovo: setFixedSize() provoca un nuovo
+            // callback onSurfaceChanged con le dimensioni corrette, quindi si esce
+            // subito senza disegnare con le dimensioni sbagliate.
+            if (forceScreenSizedSurface(holder)) return
             drawFrame()
+        }
+
+        override fun onDesiredSizeChanged(desiredWidth: Int, desiredHeight: Int) {
+            super.onDesiredSizeChanged(desiredWidth, desiredHeight)
+            // Alcuni launcher chiamano questo callback per suggerire una superficie
+            // piu' grande in un secondo momento (es. dopo aver aggiunto altre
+            // schermate home): si ignora sempre il suggerimento e si mantiene la
+            // corrispondenza 1:1 con lo schermo.
+            surfaceHolder?.let { forceScreenSizedSurface(it) }
+        }
+
+        /** Impone alla superficie le dimensioni reali dello schermo, cosi' il
+         *  render nativo resta sempre 1:1 con l'anteprima dell'editor. Ritorna
+         *  true se ha dovuto correggere una dimensione diversa da quella attuale. */
+        private fun forceScreenSizedSurface(holder: SurfaceHolder): Boolean {
+            val metrics = resources.displayMetrics
+            val targetW = metrics.widthPixels.coerceAtLeast(1)
+            val targetH = metrics.heightPixels.coerceAtLeast(1)
+            val frame = holder.surfaceFrame
+            if (frame.width() == targetW && frame.height() == targetH) return false
+            return try {
+                holder.setFixedSize(targetW, targetH)
+                true
+            } catch (e: Throwable) {
+                false
+            }
         }
 
         override fun onSurfaceRedrawNeeded(holder: SurfaceHolder) {
