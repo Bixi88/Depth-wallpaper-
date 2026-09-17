@@ -1,3 +1,5 @@
+import com.android.build.api.variant.impl.VariantOutputImpl
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -71,10 +73,15 @@ android {
 // quindi il file scaricato risultava "DepthWallpaperCreator-debug.apk". Qui si
 // sovrascrive il nome file finale in modo esplicito, per ogni variante, cosi'
 // non compare piu' la scritta "debug".
+// NB: "outputFileName" non e' esposto dall'interfaccia base VariantOutput,
+// serve castare a VariantOutputImpl (approccio documentato ufficialmente da
+// Google per questo scenario: https://developer.android.com/build/build-variants#customize-apk-name).
 androidComponents {
     onVariants { variant ->
         variant.outputs.forEach { output ->
-            output.outputFileName.set("DepthWallpaperCreator.apk")
+            if (output is VariantOutputImpl) {
+                output.outputFileName.set("DepthWallpaperCreator.apk")
+            }
         }
     }
 }
