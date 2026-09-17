@@ -7,6 +7,13 @@ android {
     namespace = "com.depthwallpaper.creator"
     compileSdk = 34
 
+    // Nome del file APK generato: senza questo Gradle usa sempre "<nome modulo>-<build
+    // type>.apk" (cioe' "app-debug.apk"), che e' quello che si vede come "app_debug"
+    // aprendo o condividendo il file scaricato (il nome dell'app installata, definito
+    // da @string/app_name nel manifest, era gia' corretto: qui si sistema solo il nome
+    // del FILE).
+    base.archivesName.set("DepthWallpaperCreator")
+
     defaultConfig {
         applicationId = "com.depthwallpaper.creator"
         minSdk = 26
