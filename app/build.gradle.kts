@@ -66,6 +66,19 @@ android {
     }
 }
 
+// Il blocco sopra (base.archivesName) fissa solo il nome BASE del file: Gradle
+// aggiunge comunque in automatico il suffisso del build type (es. "-debug"),
+// quindi il file scaricato risultava "DepthWallpaperCreator-debug.apk". Qui si
+// sovrascrive il nome file finale in modo esplicito, per ogni variante, cosi'
+// non compare piu' la scritta "debug".
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("DepthWallpaperCreator.apk")
+        }
+    }
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-ktx:1.9.2")
