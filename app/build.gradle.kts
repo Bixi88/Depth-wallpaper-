@@ -94,6 +94,10 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.9.2")
     implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
 
+    // Legge l'orientamento EXIF delle foto (vedi decodeAtLongSide in MainActivity):
+    // libreria ufficiale Android, nessun codice nativo, footprint minimo.
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
+
     // Upscaling AI (Real-ESRGAN-General-x4v3 in TFLite): libreria pura Kotlin/Java,
     // nessun codice nativo NDK/C++ da aggiungere al progetto. Il delegate NNAPI
     // (opzionale, per sfruttare NPU/DSP dove disponibile) e' incluso nel core.

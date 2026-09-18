@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -26,6 +27,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.exifinterface.media.ExifInterface
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
@@ -48,6 +50,17 @@ class MainActivity : ComponentActivity() {
 
     /** Layer per cui è stata avviata l'ultima richiesta di selezione immagine ("bg" o "fg"). */
     private var pendingLayer: String = "bg"
+
+    /**
+     * URI del file ORIGINALE scelto come sfondo, conservato apposta per l'Upscaling AI.
+     * La copia che vive nella WebView e' volutamente rimpicciolita (serve come anteprima,
+     * non come master): darla in pasto al modello significava fargli ricostruire dettagli
+     * che nel file originale c'erano gia'. Quando l'utente lancia l'upscaling si riparte
+     * da qui, rileggendo il file da zero alla risoluzione che serve davvero.
+     * Resta null se lo sfondo non viene da una scelta in galleria (es. stato ripristinato):
+     * in quel caso si ricade sul vecchio percorso, che continua a funzionare.
+     */
+    private var bgSourceUri: Uri? = null
 
     /** Dati in attesa di un permesso di scrittura storage (solo Android <= 9). */
     private var pendingSaveBytes: ByteArray? = null
@@ -147,6 +160,10 @@ class MainActivity : ComponentActivity() {
             // ci serve solo leggere il file una volta per convertirlo in base64.
         }
 
+        // Solo per lo sfondo: il ritaglio soggetto ("fg-source") non deve mai
+        // sovrascrivere il master della foto di sfondo.
+        if (pendingLayer == "bg") bgSourceUri = uri
+
         try {
             val bytes = readAndDownscale(uri)
             if (bytes == null) {
@@ -173,26 +190,118 @@ class MainActivity : ComponentActivity() {
      * di sistema): qui limitiamo il lato lungo a maxSide prima di ricomprimere in JPEG.
      */
     private fun readAndDownscale(uri: Uri, maxSide: Int = 2000): ByteArray? {
+        val decoded = decodeAtLongSide(uri, maxSide) ?: return null
+
+        val out = ByteArrayOutputStream()
+        decoded.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        decoded.recycle()
+        return out.toByteArray()
+    }
+
+    /**
+     * Decodifica l'immagine puntando al lato lungo richiesto, non "alla prima potenza di 2
+     * che sta sotto". inSampleSize lavora solo per potenze di 2: chiedendo 2000px su una
+     * foto da 4511px, il vecchio codice usava sampleSize=4 e ne consegnava 1127, quasi la
+     * meta' di quanto richiesto (e un sedicesimo dei pixel originali). Qui si decodifica al
+     * passo di dimezzamento immediatamente SUPERIORE al bisogno e poi si rifinisce con un
+     * ridimensionamento filtrato, cosi' si ottiene davvero la dimensione richiesta.
+     */
+    private fun decodeAtLongSide(uri: Uri, wantedLongSide: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        val boundsStream = contentResolver.openInputStream(uri) ?: return null
-        // NB: in modalita' inJustDecodeBounds, decodeStream restituisce sempre null "per design":
-        // non ci interessa il suo valore di ritorno, solo l'effetto collaterale su "bounds".
-        boundsStream.use { BitmapFactory.decodeStream(it, null, bounds) }
+        contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
+        val srcLong = maxOf(bounds.outWidth, bounds.outHeight)
+        // Il piu' grande dimezzamento che lascia comunque almeno i pixel richiesti.
         var sampleSize = 1
-        while (bounds.outWidth / sampleSize > maxSide || bounds.outHeight / sampleSize > maxSide) {
-            sampleSize *= 2
-        }
+        while (srcLong / (sampleSize * 2) >= wantedLongSide) sampleSize *= 2
 
-        val bitmap = contentResolver.openInputStream(uri)?.use {
+        val rawDecoded = contentResolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sampleSize })
         } ?: return null
 
-        val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
-        bitmap.recycle()
-        return out.toByteArray()
+        // I pixel nel file sono spesso "sdraiati": il telefono scrive l'immagine cosi'
+        // com'e' uscita dal sensore e annota a parte, nei metadati EXIF, di quanto va
+        // girata per apparire dritta. Chi guarda solo i pixel (come BitmapFactory) la
+        // vede storta. Si applica qui, in un punto solo, cosi' anteprima, ritaglio
+        // soggetto e Upscaling AI restano automaticamente coerenti fra loro.
+        val decoded = applyExifOrientation(uri, rawDecoded)
+
+        val long = maxOf(decoded.width, decoded.height)
+        if (long <= wantedLongSide) return decoded
+
+        val f = wantedLongSide.toFloat() / long
+        val w = maxOf(1, Math.round(decoded.width * f))
+        val h = maxOf(1, Math.round(decoded.height * f))
+        val scaled = Bitmap.createScaledBitmap(decoded, w, h, true)
+        if (scaled !== decoded) decoded.recycle()
+        return scaled
+    }
+
+    /**
+     * Legge l'orientamento EXIF del file (0/90/180/270°, con eventuale ribaltamento
+     * a specchio) e restituisce il bitmap gia' raddrizzato. Se manca l'informazione,
+     * se e' gia' "normale", o se qualcosa va storto nella lettura, restituisce il
+     * bitmap originale senza toccarlo: meglio un'immagine eventualmente ancora storta
+     * che un crash.
+     */
+    private fun applyExifOrientation(uri: Uri, bitmap: Bitmap): Bitmap {
+        val orientation = try {
+            contentResolver.openInputStream(uri)?.use { ExifInterface(it).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL
+            ) } ?: ExifInterface.ORIENTATION_NORMAL
+        } catch (e: Throwable) {
+            ExifInterface.ORIENTATION_NORMAL
+        }
+        if (orientation == ExifInterface.ORIENTATION_NORMAL || orientation == ExifInterface.ORIENTATION_UNDEFINED) {
+            return bitmap
+        }
+
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.postRotate(90f); matrix.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.postRotate(270f); matrix.postScale(-1f, 1f) }
+            else -> return bitmap
+        }
+
+        return try {
+            val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            if (rotated !== bitmap) bitmap.recycle()
+            rotated
+        } catch (e: Throwable) {
+            bitmap
+        }
+    }
+
+    /** Foto pronta per il modello + lato lungo che il risultato dovra' avere. */
+    private class UpscaleSource(val bitmap: Bitmap, val targetLongSide: Int)
+
+    /**
+     * Prepara la sorgente dell'Upscaling AI rileggendo il file ORIGINALE. Due cose che
+     * prima non succedevano: il target finale viene calcolato sulle dimensioni vere del
+     * file (quindi l'upscale non puo' piu' consegnare un'immagine piu' piccola della foto
+     * di partenza), e al modello arriva la risoluzione che gli serve davvero, letta dal
+     * file e non da un JPEG gia' ridotto e ricompresso.
+     * Da chiamare fuori dal thread UI.
+     */
+    private fun loadUpscaleSource(uri: Uri): UpscaleSource? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        val origLong = maxOf(bounds.outWidth, bounds.outHeight)
+        val target = Upscaler.targetLongSideFor(origLong)
+        // Mai oltre l'originale: ingrandire prima dell'inferenza darebbe alla rete
+        // pixel gia' interpolati, cioe' dettaglio finto al posto di dettaglio vero.
+        val input = Upscaler.plannedInputLongSide(applicationContext, target).coerceAtMost(origLong)
+
+        val bitmap = decodeAtLongSide(uri, input) ?: return null
+        return UpscaleSource(bitmap, target)
     }
 
     private fun notifyImageLoaded(layer: String, dataUrl: String?, errorMessage: String?) {
@@ -410,22 +519,56 @@ class MainActivity : ComponentActivity() {
 
         /**
          * "Upscaling AI": esegue Real-ESRGAN-General-x4v3 (TFLite, on-device) sulla foto
-         * intera ricevuta come data URL. NON opera mai sul solo soggetto ritagliato: quella
-         * resta una feature separata dell'app, indipendente da questa. L'inferenza a tile
-         * puo' richiedere qualche secondo: gira sempre fuori dal thread UI.
+         * intera. NON opera mai sul solo soggetto ritagliato: quella resta una feature
+         * separata dell'app, indipendente da questa. L'inferenza a tile puo' richiedere
+         * qualche secondo: gira sempre fuori dal thread UI.
+         *
+         * Il data URL ricevuto dal JS e' solo un RIPIEGO. La sorgente buona e' il file
+         * originale in galleria (bgSourceUri), riletto qui da zero: il data URL e' la
+         * copia rimpicciolita per l'anteprima, usarla significava chiedere al modello di
+         * reinventare dettagli che nel file c'erano gia'.
+         *
+         * L'operazione e' ripetibile: premendo di nuovo "Upscaling AI" si riparte sempre
+         * dall'originale, quindi non si impilano due passaggi 4x uno sull'altro.
          */
         @JavascriptInterface
         fun upscaleImage(imageDataUrl: String) {
             Thread {
                 try {
-                    val bitmap = bitmapFromDataUrl(imageDataUrl)
-                    if (bitmap == null) {
+                    // 1) Percorso buono: si riparte dal file originale in galleria.
+                    var source: UpscaleSource? = null
+                    val uri = bgSourceUri
+                    if (uri != null) {
+                        source = try {
+                            loadUpscaleSource(uri)
+                        } catch (e: Throwable) {
+                            android.util.Log.w("DepthWallpaper", "Originale non rileggibile, uso la copia in anteprima", e)
+                            null
+                        }
+                    }
+                    // 2) Ripiego: la copia gia' presente nella WebView (stato ripristinato,
+                    //    permesso revocato, file rimosso dalla galleria...). Qualita' come prima.
+                    if (source == null) {
+                        val fallback = bitmapFromDataUrl(imageDataUrl)
+                        if (fallback == null) {
+                            notifyUpscaleResult(null, "Immagine non valida")
+                            return@Thread
+                        }
+                        source = UpscaleSource(
+                            fallback,
+                            Upscaler.targetLongSideFor(maxOf(fallback.width, fallback.height))
+                        )
+                    }
+                    val prepared = source
+                    if (prepared == null) {
                         notifyUpscaleResult(null, "Immagine non valida")
                         return@Thread
                     }
+                    val bitmap = prepared.bitmap
+
                     notifyUpscaleProgress(0)
                     var lastSentPercent = -1
-                    val result = Upscaler.upscale(applicationContext, bitmap) { fraction ->
+                    val result = Upscaler.upscale(applicationContext, bitmap, prepared.targetLongSide) { fraction ->
                         val percent = (fraction * 100f).toInt().coerceIn(0, 100)
                         // Un evaluateJavascript per ogni variazione di punto percentuale
                         // (non per ogni singola tile): sono al massimo ~100 chiamate a
@@ -436,8 +579,13 @@ class MainActivity : ComponentActivity() {
                             notifyUpscaleProgress(percent)
                         }
                     }
+                    // La sorgente non serve piu': liberarla prima di allocare il JPEG
+                    // evita di tenere due immagini grandi in heap nello stesso istante.
+                    if (!bitmap.isRecycled) bitmap.recycle()
+
                     val out = ByteArrayOutputStream()
                     result.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                    result.recycle()
                     val b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
                     notifyUpscaleResult("data:image/jpeg;base64,$b64", null)
                 } catch (e: Upscaler.UnavailableException) {
