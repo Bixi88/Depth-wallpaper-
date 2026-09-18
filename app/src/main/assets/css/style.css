@@ -1022,6 +1022,28 @@ input[type="text"], select {
   z-index: 650;
 }
 
+.upscale-progress-track {
+  width: 200px;
+  max-width: 70vw;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  overflow: hidden;
+  margin-top: 4px;
+}
+.upscale-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width 0.15s ease;
+}
+.upscale-progress-pct {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
 /* ---------------- DASHBOARD SU SCHERMI LARGHI (tablet / landscape) ---------------- */
 @media (min-width: 760px) {
   #main-layout {

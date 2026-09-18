@@ -109,8 +109,12 @@ object Upscaler {
      * (gia' ricondotto sotto il tetto di sicurezza). Va chiamata FUORI dal thread UI:
      * l'inferenza a tile su una foto intera richiede da qualche secondo (NPU) a
      * decine di secondi (solo CPU) a seconda del dispositivo.
+     *
+     * onProgress, se presente, viene richiamato dopo ogni tile completata con
+     * l'avanzamento REALE (0f..1f, tile fatte / tile totali) cosi' la UI puo'
+     * mostrare una barra di caricamento vera, non una stima a tempo.
      */
-    fun upscale(context: Context, src: Bitmap): Bitmap {
+    fun upscale(context: Context, src: Bitmap, onProgress: ((Float) -> Unit)? = null): Bitmap {
         val interp = ensureInterpreter(context)
 
         val srcW = src.width
@@ -123,6 +127,8 @@ object Upscaler {
 
         val xs = tileStarts(srcW, core)
         val ys = tileStarts(srcH, core)
+        val totalTiles = xs.size * ys.size
+        var doneTiles = 0
 
         val outW = srcW * scale
         val outH = srcH * scale
@@ -141,6 +147,8 @@ object Upscaler {
                     tileOut, overlap * scale, core * scale,
                     cx * scale, cy * scale
                 )
+                doneTiles++
+                onProgress?.invoke(doneTiles.toFloat() / totalTiles)
             }
         }
 

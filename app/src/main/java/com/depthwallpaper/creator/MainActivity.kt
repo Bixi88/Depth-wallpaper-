@@ -242,6 +242,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun notifyUpscaleProgress(percent: Int) {
+        runOnUiThread {
+            webView.evaluateJavascript(
+                "window.onUpscaleProgress && window.onUpscaleProgress($percent);",
+                null
+            )
+        }
+    }
+
     // ---------------------------------------------------------------------
     // Export PNG in galleria
     // ---------------------------------------------------------------------
@@ -414,7 +423,19 @@ class MainActivity : ComponentActivity() {
                         notifyUpscaleResult(null, "Immagine non valida")
                         return@Thread
                     }
-                    val result = Upscaler.upscale(applicationContext, bitmap)
+                    notifyUpscaleProgress(0)
+                    var lastSentPercent = -1
+                    val result = Upscaler.upscale(applicationContext, bitmap) { fraction ->
+                        val percent = (fraction * 100f).toInt().coerceIn(0, 100)
+                        // Un evaluateJavascript per ogni variazione di punto percentuale
+                        // (non per ogni singola tile): sono al massimo ~100 chiamate a
+                        // prescindere da quante tile ha l'immagine, cosi' anche su foto
+                        // molto grandi il ping-pong col thread UI resta trascurabile.
+                        if (percent != lastSentPercent) {
+                            lastSentPercent = percent
+                            notifyUpscaleProgress(percent)
+                        }
+                    }
                     val out = ByteArrayOutputStream()
                     result.compress(Bitmap.CompressFormat.JPEG, 95, out)
                     val b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)

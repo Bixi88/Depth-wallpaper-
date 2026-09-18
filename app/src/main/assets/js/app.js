@@ -1046,6 +1046,8 @@
   // ===========================================================================
   const upscalePromptModal = document.getElementById("upscalePromptModal");
   const upscaleLoading = document.getElementById("upscaleLoading");
+  const upscaleProgressFill = document.getElementById("upscaleProgressFill");
+  const upscaleProgressPct = document.getElementById("upscaleProgressPct");
   const btnUpscale = document.getElementById("btnUpscale");
   const btnSaveUpscaled = document.getElementById("btnSaveUpscaled");
   let upscaleBusy = false;
@@ -1058,12 +1060,25 @@
     upscalePromptModal.classList.add("hidden");
   }
 
+  function setUpscaleProgress(percent) {
+    const p = Math.max(0, Math.min(100, Math.round(percent)));
+    upscaleProgressFill.style.width = p + "%";
+    upscaleProgressPct.textContent = p + "%";
+  }
+
   function setUpscaleBusy(busy) {
     upscaleBusy = busy;
+    if (busy) setUpscaleProgress(0);
     upscaleLoading.classList.toggle("hidden", !busy);
     btnUpscale.disabled = busy;
     btnUpscale.textContent = busy ? "Upscaling AI in corso\u2026" : "Upscaling AI";
   }
+
+  // Avanzamento REALE (tile completate / tile totali), riportato dal nativo mentre
+  // l'inferenza e' in corso: niente barre "finte" a tempo stimato.
+  window.onUpscaleProgress = function (percent) {
+    setUpscaleProgress(percent);
+  };
 
   function requestUpscale() {
     if (!state.bg.dataUrl) {
