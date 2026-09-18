@@ -97,6 +97,12 @@
           </div>
 
           <div class="field-group">
+            <button class="upload-btn ghost" id="btnUpscale">Upscaling AI</button>
+            <p class="hint-text">Migliora la nitidezza della foto intera con un modello AI on-device (Real-ESRGAN). Puoi applicarlo piu' volte di seguito per un effetto piu' marcato.</p>
+            <button class="link-btn hidden" id="btnSaveUpscaled">Salva foto upscalata (JPG)</button>
+          </div>
+
+          <div class="field-group">
             <label>Soggetto in primo piano</label>
             <div class="upload-row">
               <button class="upload-btn" id="btnCutout">Ritaglia soggetto dalla foto</button>
@@ -489,6 +495,24 @@
     </div>
     <p class="hint-text center">Pennello = ripristina il soggetto &middot; Gomma = rimuovi lo sfondo residuo.</p>
   </div>
+</div>
+
+<!-- ============== PROMPT UPSCALING AI ============== -->
+<div id="upscalePromptModal" class="prompt-modal hidden">
+  <div class="prompt-card">
+    <p class="prompt-title">Vuoi migliorare la foto con l'Upscaling AI prima di continuare?</p>
+    <p class="hint-text center">Un modello AI on-device aumenta la risoluzione e riduce sfocatura/rumore. Richiede qualche secondo.</p>
+    <div class="prompt-actions">
+      <button id="upscalePromptYesBtn" class="upload-btn primary">Upscaling AI</button>
+      <button id="upscalePromptSkipBtn" class="upload-btn ghost">Salta, continua cos&igrave;</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============== OVERLAY ELABORAZIONE UPSCALING AI ============== -->
+<div id="upscaleLoading" class="cutout-loading app-loading hidden">
+  <div class="spinner"></div>
+  <span>Upscaling AI in corso&hellip;</span>
 </div>
 
 <script src="js/app.js"></script>

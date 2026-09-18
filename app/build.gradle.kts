@@ -26,8 +26,11 @@ android {
 
     // I .ttf in assets/fonts restano non compressi: caricamento piu' rapido sia
     // dalla WebView (@font-face) sia dal renderer nativo (Typeface.createFromAsset).
+    // Il .tflite dell'upscaler AI DEVE restare non compresso: TFLite lo mappa in
+    // memoria (mmap) direttamente dall'APK, cosa impossibile se e' compresso.
     androidResources {
         noCompress += "ttf"
+        noCompress += "tflite"
     }
 
     // Keystore di debug FISSO e versionato nel repo (keystore/debug.keystore).
@@ -90,4 +93,9 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.activity:activity-ktx:1.9.2")
     implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
+
+    // Upscaling AI (Real-ESRGAN-General-x4v3 in TFLite): libreria pura Kotlin/Java,
+    // nessun codice nativo NDK/C++ da aggiungere al progetto. Il delegate NNAPI
+    // (opzionale, per sfruttare NPU/DSP dove disponibile) e' incluso nel core.
+    implementation("org.tensorflow:tensorflow-lite:2.16.1")
 }

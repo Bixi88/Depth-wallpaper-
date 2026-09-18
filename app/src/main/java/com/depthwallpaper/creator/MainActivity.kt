@@ -52,6 +52,7 @@ class MainActivity : ComponentActivity() {
     /** Dati in attesa di un permesso di scrittura storage (solo Android <= 9). */
     private var pendingSaveBytes: ByteArray? = null
     private var pendingSaveFileName: String? = null
+    private var pendingSaveMimeType: String = "image/png"
 
     private val pickImageLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -63,10 +64,12 @@ class MainActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             val bytes = pendingSaveBytes
             val name = pendingSaveFileName
+            val mime = pendingSaveMimeType
             pendingSaveBytes = null
             pendingSaveFileName = null
+            pendingSaveMimeType = "image/png"
             if (granted && bytes != null && name != null) {
-                val ok = saveBitmapToGallery(bytes, name)
+                val ok = saveBitmapToGallery(bytes, name, mime)
                 notifyImageSaved(ok)
             } else {
                 notifyImageSaved(false)
@@ -228,16 +231,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun notifyUpscaleResult(dataUrl: String?, errorMessage: String?) {
+        runOnUiThread {
+            val arg = if (dataUrl != null) "'${dataUrl}'" else "null"
+            val errArg = if (errorMessage != null) "'${errorMessage.replace("'", "\\'")}'" else "null"
+            webView.evaluateJavascript(
+                "window.onUpscaleResult && window.onUpscaleResult($arg, $errArg);",
+                null
+            )
+        }
+    }
+
     // ---------------------------------------------------------------------
     // Export PNG in galleria
     // ---------------------------------------------------------------------
 
-    private fun saveBitmapToGallery(bytes: ByteArray, fileName: String): Boolean {
+    private fun saveBitmapToGallery(bytes: ByteArray, fileName: String, mimeType: String = "image/png"): Boolean {
         return try {
             val resolver = contentResolver
             val values = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                put(MediaStore.Images.Media.MIME_TYPE, mimeType)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     put(
                         MediaStore.Images.Media.RELATIVE_PATH,
@@ -266,6 +280,18 @@ class MainActivity : ComponentActivity() {
     private fun defaultFileName(): String {
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         return "depth_wallpaper_$stamp.png"
+    }
+
+    private fun defaultUpscaledFileName(): String {
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        return "depth_wallpaper_upscaled_$stamp.jpg"
+    }
+
+    /** Decodifica una data URL "data:image/...;base64,...." in un Bitmap. */
+    private fun bitmapFromDataUrl(dataUrl: String): Bitmap? {
+        val pureBase64 = dataUrl.substringAfter(",", dataUrl)
+        val bytes = Base64.decode(pureBase64, Base64.DEFAULT)
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
     }
 
     // ---------------------------------------------------------------------
@@ -361,9 +387,72 @@ class MainActivity : ComponentActivity() {
                     if (needsLegacyPermission) {
                         pendingSaveBytes = bytes
                         pendingSaveFileName = fileName
+                        pendingSaveMimeType = "image/png"
                         requestStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
                     } else {
-                        val ok = saveBitmapToGallery(bytes, fileName)
+                        val ok = saveBitmapToGallery(bytes, fileName, "image/png")
+                        notifyImageSaved(ok)
+                    }
+                } catch (e: Exception) {
+                    notifyImageSaved(false)
+                }
+            }
+        }
+
+        /**
+         * "Upscaling AI": esegue Real-ESRGAN-General-x4v3 (TFLite, on-device) sulla foto
+         * intera ricevuta come data URL. NON opera mai sul solo soggetto ritagliato: quella
+         * resta una feature separata dell'app, indipendente da questa. L'inferenza a tile
+         * puo' richiedere qualche secondo: gira sempre fuori dal thread UI.
+         */
+        @JavascriptInterface
+        fun upscaleImage(imageDataUrl: String) {
+            Thread {
+                try {
+                    val bitmap = bitmapFromDataUrl(imageDataUrl)
+                    if (bitmap == null) {
+                        notifyUpscaleResult(null, "Immagine non valida")
+                        return@Thread
+                    }
+                    val result = Upscaler.upscale(applicationContext, bitmap)
+                    val out = ByteArrayOutputStream()
+                    result.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                    val b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                    notifyUpscaleResult("data:image/jpeg;base64,$b64", null)
+                } catch (e: Upscaler.UnavailableException) {
+                    notifyUpscaleResult(null, e.message ?: "Upscaling AI non disponibile su questo dispositivo")
+                } catch (e: Throwable) {
+                    android.util.Log.e("DepthWallpaper", "Upscaling AI fallito", e)
+                    notifyUpscaleResult(null, "Upscaling AI non riuscito: ${e.message ?: e.javaClass.simpleName}")
+                }
+            }.start()
+        }
+
+        /**
+         * Salva in galleria (JPG) la foto intera gia' upscalata cosi' com'e' arrivata dal
+         * JS: nessuna composizione con orologio/data/soggetto, solo l'immagine di base.
+         */
+        @JavascriptInterface
+        fun saveUpscaledJpeg(imageDataUrl: String, suggestedFileName: String?) {
+            val fileName = if (suggestedFileName.isNullOrBlank()) defaultUpscaledFileName() else suggestedFileName
+            runOnUiThread {
+                try {
+                    val pureBase64 = imageDataUrl.substringAfter(",", imageDataUrl)
+                    val bytes = Base64.decode(pureBase64, Base64.DEFAULT)
+
+                    val needsLegacyPermission = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                        ContextCompat.checkSelfPermission(
+                            this@MainActivity,
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE
+                        ) != PackageManager.PERMISSION_GRANTED
+
+                    if (needsLegacyPermission) {
+                        pendingSaveBytes = bytes
+                        pendingSaveFileName = fileName
+                        pendingSaveMimeType = "image/jpeg"
+                        requestStoragePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                    } else {
+                        val ok = saveBitmapToGallery(bytes, fileName, "image/jpeg")
                         notifyImageSaved(ok)
                     }
                 } catch (e: Exception) {

@@ -952,6 +952,76 @@ input[type="text"], select {
 }
 .cutout-actions-row .upload-btn { flex: 1; }
 
+/* ---------------- UPSCALING AI ---------------- */
+.upload-btn.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: var(--accent-ink);
+  border: none;
+}
+
+/* Bottone "poco vistoso" per il salvataggio della foto upscalata: un link testuale,
+   non un pulsante pieno, per non competere visivamente con le azioni principali. */
+.link-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  background: none;
+  border: none;
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-align: center;
+  cursor: pointer;
+  padding: 4px;
+}
+.link-btn.hidden { display: none; }
+
+/* Tab/bottone "Soggetto" bloccati finche' non si decide sull'Upscaling AI. */
+.tab-btn.tab-locked { opacity: 0.4; }
+.upload-btn.btn-locked { opacity: 0.5; }
+
+.prompt-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 700;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.prompt-modal.hidden { display: none; }
+.prompt-card {
+  width: 100%;
+  max-width: 340px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+.prompt-title {
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+  margin: 0 0 8px;
+}
+.prompt-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+/* Overlay di elaborazione a schermo intero (fuori dall'editor di ritaglio, dove
+   .cutout-loading e' invece relativo al wrapper del canvas). */
+.app-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 650;
+}
+
 /* ---------------- DASHBOARD SU SCHERMI LARGHI (tablet / landscape) ---------------- */
 @media (min-width: 760px) {
   #main-layout {

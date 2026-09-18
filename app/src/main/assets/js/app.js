@@ -521,8 +521,23 @@
   // ===========================================================================
   // TAB
   // ===========================================================================
+  // Finche' l'utente non ha deciso se applicare l'Upscaling AI sulla foto appena
+  // caricata, il tab "Soggetto" resta bloccato: cosi' e' strutturalmente impossibile
+  // ritagliare il soggetto per sbaglio dalla versione a bassa risoluzione.
+  let subjectLocked = false;
+  function updateSubjectLockUi() {
+    const fgTab = document.querySelector('.tab-btn[data-tab="fg"]');
+    const btnCutout = document.getElementById("btnCutout");
+    if (fgTab) fgTab.classList.toggle("tab-locked", subjectLocked);
+    if (btnCutout) btnCutout.classList.toggle("btn-locked", subjectLocked);
+  }
+
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
+      if (subjectLocked && btn.dataset.tab === "fg") {
+        showToast("Decidi prima se applicare l'Upscaling AI alla foto");
+        return;
+      }
       document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
       document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
       btn.classList.add("active");
@@ -945,6 +960,10 @@
   document.getElementById("btnCutoutOther").addEventListener("click", () => requestImage("fg-source"));
 
   document.getElementById("btnCutout").addEventListener("click", () => {
+    if (subjectLocked) {
+      showToast("Decidi prima se applicare l'Upscaling AI alla foto");
+      return;
+    }
     // Se c'e' gia' una sessione di ritaglio attiva (mascherina in corso o gia'
     // applicata) si riapre esattamente li' invece di rifare l'analisi AI da zero.
     if (cutoutSourceCanvas && cutoutMaskCanvas) reopenCutoutEditor();
@@ -1016,6 +1035,98 @@
     }
     // Foto nuova come sfondo: il soggetto della foto precedente non ha piu' senso.
     setBackground(dataUrl, true, true);
+    document.getElementById("btnSaveUpscaled").classList.add("hidden");
+    subjectLocked = true;
+    updateSubjectLockUi();
+    showUpscalePrompt();
+  };
+
+  // ===========================================================================
+  // UPSCALING AI (Real-ESRGAN on-device, solo sulla foto intera)
+  // ===========================================================================
+  const upscalePromptModal = document.getElementById("upscalePromptModal");
+  const upscaleLoading = document.getElementById("upscaleLoading");
+  const btnUpscale = document.getElementById("btnUpscale");
+  const btnSaveUpscaled = document.getElementById("btnSaveUpscaled");
+  let upscaleBusy = false;
+
+  function showUpscalePrompt() {
+    if (!isNative) return; // in anteprima browser l'upscaling non e' disponibile
+    upscalePromptModal.classList.remove("hidden");
+  }
+  function hideUpscalePrompt() {
+    upscalePromptModal.classList.add("hidden");
+  }
+
+  function setUpscaleBusy(busy) {
+    upscaleBusy = busy;
+    upscaleLoading.classList.toggle("hidden", !busy);
+    btnUpscale.disabled = busy;
+    btnUpscale.textContent = busy ? "Upscaling AI in corso\u2026" : "Upscaling AI";
+  }
+
+  function requestUpscale() {
+    if (!state.bg.dataUrl) {
+      showToast("Carica prima una foto");
+      return;
+    }
+    if (!isNative) {
+      showToast("L'Upscaling AI richiede l'app Android");
+      return;
+    }
+    if (upscaleBusy) return;
+    setUpscaleBusy(true);
+    try {
+      Android.upscaleImage(state.bg.dataUrl);
+    } catch (e) {
+      setUpscaleBusy(false);
+      showToast("Errore: " + e);
+    }
+  }
+
+  document.getElementById("upscalePromptYesBtn").addEventListener("click", () => {
+    hideUpscalePrompt();
+    requestUpscale();
+  });
+  document.getElementById("upscalePromptSkipBtn").addEventListener("click", () => {
+    hideUpscalePrompt();
+    subjectLocked = false;
+    updateSubjectLockUi();
+    showToast("Puoi avviare l'Upscaling AI in qualsiasi momento dal tab Media");
+  });
+
+  btnUpscale.addEventListener("click", requestUpscale);
+
+  btnSaveUpscaled.addEventListener("click", () => {
+    if (!state.bg.dataUrl) {
+      showToast("Nessuna foto upscalata da salvare");
+      return;
+    }
+    const fileName = "depth_wallpaper_upscaled_" + Date.now() + ".jpg";
+    if (isNative) {
+      Android.saveUpscaledJpeg(state.bg.dataUrl, fileName);
+    } else {
+      const link = document.createElement("a");
+      link.href = state.bg.dataUrl;
+      link.download = fileName;
+      link.click();
+      showToast("Immagine scaricata");
+    }
+  });
+
+  // Risultato dell'upscaling: sostituisce sfondo (e sorgente per il ritaglio) con
+  // la versione upscalata. Non tocca mai il soggetto gia' eventualmente ritagliato.
+  window.onUpscaleResult = function (dataUrl, errorMessage) {
+    setUpscaleBusy(false);
+    if (!dataUrl) {
+      showToast(errorMessage || "Upscaling AI non riuscito");
+      return;
+    }
+    setBackground(dataUrl, true, false);
+    btnSaveUpscaled.classList.remove("hidden");
+    subjectLocked = false;
+    updateSubjectLockUi();
+    showToast("Upscaling AI completato \u2713");
   };
 
   // ===========================================================================
