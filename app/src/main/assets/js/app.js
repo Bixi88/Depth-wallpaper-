@@ -2080,29 +2080,6 @@
     }
   });
 
-  document.getElementById("exportPngBtn").addEventListener("click", () => {
-    if (!state.bg.img) {
-      showToast("Carica prima una foto");
-      return;
-    }
-    const exportCanvas = document.createElement("canvas");
-    exportCanvas.width = CANVAS_W;
-    exportCanvas.height = CANVAS_H;
-    render(exportCanvas.getContext("2d"), exportCanvas.width, exportCanvas.height);
-    const dataUrl = exportCanvas.toDataURL("image/png");
-    const fileName = "depth_wallpaper_" + Date.now() + ".png";
-
-    if (isNative) {
-      Android.saveImage(dataUrl, fileName);
-    } else {
-      const link = document.createElement("a");
-      link.href = dataUrl;
-      link.download = fileName;
-      link.click();
-      showToast("Immagine scaricata");
-    }
-  });
-
   window.onImageSaved = function (success) {
     showToast(success ? "Salvato in Galleria \u2713" : "Errore durante il salvataggio");
   };

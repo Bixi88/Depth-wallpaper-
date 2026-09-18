@@ -35,11 +35,18 @@ object Upscaler {
      *  scartato dopo l'inferenza per evitare cuciture visibili tra una tile e l'altra. */
     private const val OVERLAP = 8
 
-    /** Lato lungo massimo del risultato: coerente con l'ordine di grandezza (~1750x3499)
-     *  osservato negli asset di un'app di sfondi animati simile, pensato per coprire
-     *  comodamente lo schermo durante il movimento del parallasse senza sprecare
-     *  memoria/tempo su risoluzioni assurde. Oltre questo tetto si riduce in proporzione. */
-    private const val SAFETY_MAX_LONG_SIDE = 3500
+    /** Lato lungo minimo garantito per il risultato: coerente con l'ordine di grandezza
+     *  (~1750x3499) osservato negli asset di un'app di sfondi animati simile, pensato per
+     *  coprire comodamente lo schermo durante il movimento del parallasse. Usato solo come
+     *  base: se la foto sorgente e' gia' piu' grande di questo valore, il tetto reale si alza
+     *  fino al lato lungo della sorgente, cosi' l'upscale non restituisce MAI un'immagine piu'
+     *  piccola (quindi peggiore) di quella caricata. */
+    private const val SAFETY_MIN_LONG_SIDE = 3500
+
+    /** Tetto assoluto invalicabile, solo per evitare OutOfMemory su foto sorgente enormi
+     *  (4x di una foto da 6000px produrrebbe un bitmap da 24000px, improponibile su un
+     *  telefono). Sotto questo valore la risoluzione della sorgente viene sempre rispettata. */
+    private const val SAFETY_HARD_CAP_LONG_SIDE = 6000
 
     private var interpreter: Interpreter? = null
     private var nnApiDelegate: NnApiDelegate? = null
@@ -153,7 +160,7 @@ object Upscaler {
         }
 
         val full = Bitmap.createBitmap(outPixels, outW, outH, Bitmap.Config.ARGB_8888)
-        return capToSafetySize(full)
+        return capToSafetySize(full, max(srcW, srcH))
     }
 
     /** Posizioni di partenza del "nucleo" di ogni tile lungo un asse: l'ultima è
@@ -225,10 +232,11 @@ object Upscaler {
         }
     }
 
-    private fun capToSafetySize(bitmap: Bitmap): Bitmap {
+    private fun capToSafetySize(bitmap: Bitmap, srcLongSide: Int): Bitmap {
         val long = max(bitmap.width, bitmap.height)
-        if (long <= SAFETY_MAX_LONG_SIDE) return bitmap
-        val f = SAFETY_MAX_LONG_SIDE.toFloat() / long
+        val cap = max(SAFETY_MIN_LONG_SIDE, srcLongSide).coerceAtMost(SAFETY_HARD_CAP_LONG_SIDE)
+        if (long <= cap) return bitmap
+        val f = cap.toFloat() / long
         val w = max(1, (bitmap.width * f).roundToInt())
         val h = max(1, (bitmap.height * f).roundToInt())
         val scaled = Bitmap.createScaledBitmap(bitmap, w, h, true)
