@@ -89,6 +89,10 @@ data class ClockConfig(
     val mode: String,       // "time" | "custom"
     val customText: String,
     val format: String,     // "24" | "24short" | "12" | "12ampm"
+    /** Se true, tra ore e minuti compaiono due puntini centrali (stile ":"),
+     * disegnati come forme separate e non come glifo del font: i due gruppi
+     * di cifre si distanziano automaticamente per lasciargli spazio. */
+    val centerDots: Boolean = false,
     val style: TextLayerConfig
 )
 
@@ -119,6 +123,7 @@ data class WallpaperConfig(
         fun default(): WallpaperConfig = WallpaperConfig(
             clock = ClockConfig(
                 enabled = true, mode = "time", customText = "", format = "24",
+                centerDots = false,
                 style = TextLayerConfig.default(150f, 0.30f, true)
             ),
             date = DateConfig(
@@ -141,6 +146,7 @@ data class WallpaperConfig(
                     mode = c.optString("mode", "time"),
                     customText = c.optString("customText", ""),
                     format = c.optString("format", "24"),
+                    centerDots = c.optBoolean("centerDots", false),
                     style = TextLayerConfig.fromJson(c.optJSONObject("style"), 150f, 0.30f, true)
                 )
 

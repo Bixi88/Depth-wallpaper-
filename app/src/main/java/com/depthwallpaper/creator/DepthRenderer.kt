@@ -66,7 +66,8 @@ object DepthRenderer {
             drawTextLayer(
                 canvas, w, h, k, config.clock.style,
                 clockText(config.clock),
-                multiline = config.clock.mode == "custom"
+                multiline = config.clock.mode == "custom",
+                dotsForColon = config.clock.centerDots
             )
         }
 
@@ -218,7 +219,8 @@ object DepthRenderer {
         k: Float,
         style: TextLayerConfig,
         text: String,
-        multiline: Boolean
+        multiline: Boolean,
+        dotsForColon: Boolean = false
     ) {
         if (text.isEmpty()) return
         var sizePx = style.size * k
@@ -240,7 +242,7 @@ object DepthRenderer {
         // risultato reale sul dispositivo resta coerente con l'anteprima dell'editor.
         var effK = k
         if (!multiline) {
-            val naturalW = measureTracked(base, text, tracking) * sx
+            val naturalW = measureTracked(base, text, tracking, dotsForColon) * sx
             val maxAllowed = w * 0.94f
             if (naturalW > maxAllowed && naturalW > 0f) {
                 val fit = maxAllowed / naturalW
@@ -252,7 +254,7 @@ object DepthRenderer {
         }
 
         val lines: List<String> = if (multiline) {
-            wrapLines(base, text, (w * 0.92f) / sx, tracking)
+            wrapLines(base, text, (w * 0.92f) / sx, tracking, dotsForColon)
         } else {
             listOf(text)
         }
@@ -269,7 +271,7 @@ object DepthRenderer {
         // Larghezza massima tra le righe: serve sia al pannello dietro sia al
         // gradiente del riempimento (calcolata una sola volta).
         var maxLineWidth = 0f
-        for (line in lines) maxLineWidth = maxOf(maxLineWidth, measureTracked(base, line, tracking))
+        for (line in lines) maxLineWidth = maxOf(maxLineWidth, measureTracked(base, line, tracking, dotsForColon))
 
         // --- pannello dietro al testo ---
         if (style.plateOpacity > 0f) {
@@ -297,7 +299,7 @@ object DepthRenderer {
 
         // --- alone morbido ---
         if (style.glowWidth > 0f) {
-            val glowPath = buildTrackedPath(base, lines, firstY, lineHeight, tracking)
+            val glowPath = buildTrackedPath(base, lines, firstY, lineHeight, tracking, dotsForColon)
             val glow = Paint(base)
             glow.style = Paint.Style.STROKE
             glow.strokeJoin = Paint.Join.ROUND
@@ -320,7 +322,7 @@ object DepthRenderer {
                     canvas, base, lines, firstY, lineHeight, tracking,
                     Paint.Style.STROKE, style.outlineWidth * effK * 2f,
                     Color.argb((style.shadowOpacity.coerceIn(0f, 1f) * 255).toInt(), 0, 0, 0),
-                    style.shadowBlur * effK, style.shadowOffsetY * effK
+                    style.shadowBlur * effK, style.shadowOffsetY * effK, dotsForColon
                 )
                 shadowPending = false
             }
@@ -331,7 +333,7 @@ object DepthRenderer {
             outline.strokeWidth = style.outlineWidth * effK * 2f
             outline.color = parseColor(style.outlineColor, Color.BLACK)
             outline.alpha = (alpha * 255).toInt()
-            drawLines(canvas, outline, lines, firstY, lineHeight, tracking)
+            drawLines(canvas, outline, lines, firstY, lineHeight, tracking, dotsForColon)
         }
 
         // --- riempimento ---
@@ -340,7 +342,7 @@ object DepthRenderer {
                 canvas, base, lines, firstY, lineHeight, tracking,
                 Paint.Style.FILL, 0f,
                 Color.argb((style.shadowOpacity.coerceIn(0f, 1f) * 255).toInt(), 0, 0, 0),
-                style.shadowBlur * effK, style.shadowOffsetY * effK
+                style.shadowBlur * effK, style.shadowOffsetY * effK, dotsForColon
             )
             shadowPending = false
         }
@@ -400,10 +402,20 @@ object DepthRenderer {
                 )
             }
         }
-        drawLines(canvas, fill, lines, firstY, lineHeight, tracking)
+        drawLines(canvas, fill, lines, firstY, lineHeight, tracking, dotsForColon)
 
         canvas.restore()
     }
+
+    // --- puntini centrali (":") -----------------------------------------------------
+    // Il ':' non e' mai un vero glifo del font: se dotsForColon e' attivo viene sempre
+    // sostituito da due cerchi disegnati a parte, cosi' il risultato e' identico su
+    // qualunque font (molti "digital" non hanno un glifo ':' gradevole). Le proporzioni
+    // sono ricavate dalla larghezza della cifra "0" cosi' restano coerenti a qualunque
+    // dimensione/font, in linea con l'editor in assets/js/app.js.
+    private fun dotSlotWidth(paint: Paint): Float = paint.measureText("0") * 0.85f
+    private fun dotRadius(paint: Paint): Float = paint.measureText("0") * 0.16f
+    private fun dotOffset(paint: Paint): Float = paint.measureText("0") * 0.30f
 
     private fun drawLines(
         canvas: Canvas,
@@ -411,40 +423,62 @@ object DepthRenderer {
         lines: List<String>,
         firstY: Float,
         lineHeight: Float,
-        tracking: Float
+        tracking: Float,
+        dotsForColon: Boolean = false
     ) {
         var y = firstY
         for (line in lines) {
-            drawTracked(canvas, paint, line, y, tracking)
+            drawTracked(canvas, paint, line, y, tracking, dotsForColon)
             y += lineHeight
         }
     }
 
     /** Disegna il testo centrato in (0, y), con spaziatura personalizzata tra le lettere. */
-    private fun drawTracked(canvas: Canvas, paint: Paint, text: String, y: Float, tracking: Float) {
+    private fun drawTracked(
+        canvas: Canvas,
+        paint: Paint,
+        text: String,
+        y: Float,
+        tracking: Float,
+        dotsForColon: Boolean = false
+    ) {
         val metrics = paint.fontMetrics
         val baselineY = y - (metrics.ascent + metrics.descent) / 2f
+        val hasMarker = dotsForColon && text.contains(':')
 
-        if (tracking == 0f) {
+        if (tracking == 0f && !hasMarker) {
             paint.textAlign = Paint.Align.CENTER
             canvas.drawText(text, 0f, baselineY, paint)
             return
         }
 
         paint.textAlign = Paint.Align.LEFT
-        var x = -measureTracked(paint, text, tracking) / 2f
+        var x = -measureTracked(paint, text, tracking, dotsForColon) / 2f
         for (ch in text) {
-            val s = ch.toString()
-            canvas.drawText(s, x, baselineY, paint)
-            x += paint.measureText(s) + tracking
+            if (hasMarker && ch == ':') {
+                val slot = dotSlotWidth(paint)
+                val cx = x + slot / 2f
+                val r = dotRadius(paint)
+                val off = dotOffset(paint)
+                canvas.drawCircle(cx, baselineY - off, r, paint)
+                canvas.drawCircle(cx, baselineY + off, r, paint)
+                x += slot + tracking
+            } else {
+                val s = ch.toString()
+                canvas.drawText(s, x, baselineY, paint)
+                x += paint.measureText(s) + tracking
+            }
         }
     }
 
-    private fun measureTracked(paint: Paint, text: String, tracking: Float): Float {
+    private fun measureTracked(paint: Paint, text: String, tracking: Float, dotsForColon: Boolean = false): Float {
         if (text.isEmpty()) return 0f
-        if (tracking == 0f) return paint.measureText(text)
+        val hasMarker = dotsForColon && text.contains(':')
+        if (tracking == 0f && !hasMarker) return paint.measureText(text)
         var total = 0f
-        for (ch in text) total += paint.measureText(ch.toString())
+        for (ch in text) {
+            total += if (hasMarker && ch == ':') dotSlotWidth(paint) else paint.measureText(ch.toString())
+        }
         return total + tracking * (text.length - 1)
     }
 
@@ -454,26 +488,44 @@ object DepthRenderer {
      *  si sovrapponeva tra le lettere sommandosi e creando un alone molto piu'
      *  grande e visibile del previsto (specie evidente con il riempimento a
      *  gradiente). Specchio di buildTrackedPath in assets/js/app.js. */
-    private fun buildTrackedPath(paint: Paint, lines: List<String>, firstY: Float, lineHeight: Float, tracking: Float): Path {
+    private fun buildTrackedPath(
+        paint: Paint,
+        lines: List<String>,
+        firstY: Float,
+        lineHeight: Float,
+        tracking: Float,
+        dotsForColon: Boolean = false
+    ): Path {
         val path = Path()
         var y = firstY
         val metrics = paint.fontMetrics
         for (line in lines) {
             val baselineY = y - (metrics.ascent + metrics.descent) / 2f
-            if (tracking == 0f) {
+            val hasMarker = dotsForColon && line.contains(':')
+            if (tracking == 0f && !hasMarker) {
                 paint.textAlign = Paint.Align.CENTER
                 val glyphPath = Path()
                 paint.getTextPath(line, 0, line.length, 0f, baselineY, glyphPath)
                 path.addPath(glyphPath)
             } else {
                 paint.textAlign = Paint.Align.LEFT
-                var x = -measureTracked(paint, line, tracking) / 2f
+                var x = -measureTracked(paint, line, tracking, dotsForColon) / 2f
                 for (ch in line) {
-                    val s = ch.toString()
-                    val chPath = Path()
-                    paint.getTextPath(s, 0, s.length, x, baselineY, chPath)
-                    path.addPath(chPath)
-                    x += paint.measureText(s) + tracking
+                    if (hasMarker && ch == ':') {
+                        val slot = dotSlotWidth(paint)
+                        val cx = x + slot / 2f
+                        val r = dotRadius(paint)
+                        val off = dotOffset(paint)
+                        path.addCircle(cx, baselineY - off, r, Path.Direction.CW)
+                        path.addCircle(cx, baselineY + off, r, Path.Direction.CW)
+                        x += slot + tracking
+                    } else {
+                        val s = ch.toString()
+                        val chPath = Path()
+                        paint.getTextPath(s, 0, s.length, x, baselineY, chPath)
+                        path.addPath(chPath)
+                        x += paint.measureText(s) + tracking
+                    }
                 }
             }
             y += lineHeight
@@ -487,9 +539,9 @@ object DepthRenderer {
     private fun drawUnifiedShadow(
         canvas: Canvas, base: Paint, lines: List<String>, firstY: Float, lineHeight: Float,
         tracking: Float, style: Paint.Style, strokeWidth: Float,
-        shadowColor: Int, shadowBlur: Float, shadowOffsetY: Float
+        shadowColor: Int, shadowBlur: Float, shadowOffsetY: Float, dotsForColon: Boolean = false
     ) {
-        val path = buildTrackedPath(base, lines, firstY, lineHeight, tracking)
+        val path = buildTrackedPath(base, lines, firstY, lineHeight, tracking, dotsForColon)
         val paint = Paint(base)
         paint.style = style
         if (style == Paint.Style.STROKE) {
@@ -503,14 +555,20 @@ object DepthRenderer {
         canvas.drawPath(path, paint)
     }
 
-    private fun wrapLines(paint: Paint, text: String, maxWidth: Float, tracking: Float): List<String> {
+    private fun wrapLines(
+        paint: Paint,
+        text: String,
+        maxWidth: Float,
+        tracking: Float,
+        dotsForColon: Boolean = false
+    ): List<String> {
         val result = mutableListOf<String>()
         for (rawLine in text.split("\n")) {
             val words = rawLine.split(" ")
             var current = ""
             for (word in words) {
                 val test = if (current.isEmpty()) word else "$current $word"
-                if (measureTracked(paint, test, tracking) > maxWidth && current.isNotEmpty()) {
+                if (measureTracked(paint, test, tracking, dotsForColon) > maxWidth && current.isNotEmpty()) {
                     result.add(current)
                     current = word
                 } else {
@@ -527,13 +585,17 @@ object DepthRenderer {
     // -------------------------------------------------------------------------------
     private fun clockText(clock: ClockConfig): String {
         if (clock.mode == "custom") return clock.customText.ifBlank { "Il tuo testo" }
-        // Ore e minuti attaccati, senza alcun separatore (deve restare
-        // identico all'editor in assets/js/app.js).
+        // Ore e minuti attaccati, senza alcun separatore, a meno che i "puntini
+        // centrali" non siano attivi: in quel caso si inserisce un ':' letterale
+        // (tra apici singoli nel pattern) che drawTextLayer riconosce come segnaposto
+        // per i due puntini disegnati a parte, invece che come glifo del font.
+        // Deve restare identico all'editor in assets/js/app.js.
+        val sep = if (clock.centerDots) "':'" else ""
         val pattern = when (clock.format) {
-            "24short" -> "Hmm"
-            "12" -> "hmm"
-            "12ampm" -> "hmm a"
-            else -> "HHmm"
+            "24short" -> "H${sep}mm"
+            "12" -> "h${sep}mm"
+            "12ampm" -> "h${sep}mm a"
+            else -> "HH${sep}mm"
         }
         return try {
             SimpleDateFormat(pattern, Locale.getDefault()).format(Date())

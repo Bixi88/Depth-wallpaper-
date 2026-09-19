@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.net.Uri
 import android.os.Build
@@ -205,11 +206,151 @@ class MainActivity : ComponentActivity() {
      * meta' di quanto richiesto (e un sedicesimo dei pixel originali). Qui si decodifica al
      * passo di dimezzamento immediatamente SUPERIORE al bisogno e poi si rifinisce con un
      * ridimensionamento filtrato, cosi' si ottiene davvero la dimensione richiesta.
+     *
+     * Prima di tutto pero' si prova ImageDecoder (API 28+): a differenza di BitmapFactory
+     * legge correttamente anche i casi che in pratica mandavano in errore "formato non
+     * supportato" pur trattandosi di un .jpg valido, ad es. foto di Google Foto/Drive
+     * ancora "solo cloud" (non scaricate sul device: il provider le rende disponibili
+     * solo tramite file descriptor, non tramite lo stream diretto che usa BitmapFactory),
+     * o file HEIC/WebP salvati con estensione .jpg dopo un trasferimento/conversione.
      */
     private fun decodeAtLongSide(uri: Uri, wantedLongSide: Int): Bitmap? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                val source = ImageDecoder.createSource(contentResolver, uri)
+                val decoded = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                    // ImageDecoder applica gia' da solo l'orientamento EXIF: qui serve
+                    // solo chiedere il downscale, cosi' evitiamo di allocare l'immagine
+                    // a piena risoluzione per poi ridimensionarla subito dopo.
+                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    decoder.isMutableRequired = true
+                    val srcLong = maxOf(info.size.width, info.size.height)
+                    if (srcLong > wantedLongSide) {
+                        val f = wantedLongSide.toFloat() / srcLong
+                        val w = maxOf(1, Math.round(info.size.width * f))
+                        val h = maxOf(1, Math.round(info.size.height * f))
+                        decoder.setTargetSize(w, h)
+                    }
+                }
+                if (decoded.width > 0 && decoded.height > 0) return decoded
+                decoded.recycle()
+            } catch (e: Throwable) {
+                android.util.Log.w(
+                    "DepthWallpaper",
+                    "ImageDecoder non è riuscito a leggere uri=$uri, provo con BitmapFactory", e
+                )
+            }
+        }
+        decodeAtLongSideLegacy(uri, wantedLongSide)?.let { return it }
+
+        // Ultima spiaggia: alcuni file (tipicamente foto passate da Snapseed) hanno un
+        // blocco EXIF che dichiara dimensioni completamente diverse (spesso molto piu'
+        // grandi) da quelle dei dati JPEG veri e propri. Sia ImageDecoder sia
+        // BitmapFactory possono rifiutare in blocco un file cosi', scambiandolo per
+        // corrotto o "non supportato" pur essendo un JPEG valido: si toglie qui solo il
+        // blocco EXIF incoerente (mai i dati immagine) e si riprova. L'orientamento
+        // corretto viene comunque letto a parte da applyExifOrientation, sul file
+        // originale, quindi non si perde.
+        return try {
+            val raw = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            val stripped = stripExifSegment(raw)
+            if (stripped.size == raw.size) return null // niente da togliere, non aiuterebbe
+            decodeAtLongSideFromBytes(stripped, wantedLongSide)
+                ?.let { applyExifOrientation(uri, it) } // l'orientamento si legge comunque dal file originale
+                ?.also {
+                    android.util.Log.i("DepthWallpaper", "Recuperata decodifica di uri=$uri dopo rimozione EXIF incoerente")
+                }
+        } catch (e: Throwable) {
+            android.util.Log.e("DepthWallpaper", "Fallito anche il tentativo con EXIF ripulito per uri=$uri", e)
+            null
+        }
+    }
+
+    /** Rimuove solo il segmento EXIF (marker APP1, 0xFFE1) di un JPEG, lasciando intatti
+     * tutti i dati immagine. Se il file non è un JPEG riconoscibile lo restituisce invariato. */
+    private fun stripExifSegment(bytes: ByteArray): ByteArray {
+        if (bytes.size < 4 || bytes[0] != 0xFF.toByte() || bytes[1] != 0xD8.toByte()) return bytes
+        val out = ByteArrayOutputStream(bytes.size)
+        out.write(bytes, 0, 2) // SOI
+        var i = 2
+        while (i + 2 <= bytes.size) {
+            if (bytes[i] != 0xFF.toByte()) {
+                // Dati inattesi prima dell'inizio della scansione: si copia il resto cosi' com'e'.
+                out.write(bytes, i, bytes.size - i)
+                i = bytes.size
+                break
+            }
+            val marker = bytes[i + 1].toInt() and 0xFF
+            if (marker == 0xD8 || marker == 0x01 || marker in 0xD0..0xD7) {
+                out.write(bytes, i, 2) // marcatori senza payload
+                i += 2
+                continue
+            }
+            if (marker == 0xD9 || i + 4 > bytes.size) { // EOI o file troncato
+                out.write(bytes, i, bytes.size - i)
+                i = bytes.size
+                break
+            }
+            val len = ((bytes[i + 2].toInt() and 0xFF) shl 8) or (bytes[i + 3].toInt() and 0xFF)
+            val segEnd = i + 2 + len
+            if (segEnd > bytes.size) { out.write(bytes, i, bytes.size - i); i = bytes.size; break }
+            if (marker != 0xE1) out.write(bytes, i, segEnd - i) // salta solo l'EXIF (APP1)
+            i = segEnd
+            if (marker == 0xDA) { // inizio dati di scansione: da qui si copia tutto senza reinterpretare
+                out.write(bytes, i, bytes.size - i)
+                i = bytes.size
+                break
+            }
+        }
+        return out.toByteArray()
+    }
+
+    /** Come decodeAtLongSideLegacy ma partendo da byte già in memoria invece che da un Uri. */
+    private fun decodeAtLongSideFromBytes(bytes: ByteArray, wantedLongSide: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+
+        val srcLong = maxOf(bounds.outWidth, bounds.outHeight)
+        var sampleSize = 1
+        while (srcLong / (sampleSize * 2) >= wantedLongSide) sampleSize *= 2
+
+        val decoded = BitmapFactory.decodeByteArray(
+            bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        ) ?: return null
+
+        val long = maxOf(decoded.width, decoded.height)
+        if (long <= wantedLongSide) return decoded
+
+        val f = wantedLongSide.toFloat() / long
+        val w = maxOf(1, Math.round(decoded.width * f))
+        val h = maxOf(1, Math.round(decoded.height * f))
+        val scaled = Bitmap.createScaledBitmap(decoded, w, h, true)
+        if (scaled !== decoded) decoded.recycle()
+        return scaled
+    }
+
+    /** Vecchio percorso via BitmapFactory: resta come fallback per API < 28 e per i
+     * (rari) casi in cui anche ImageDecoder fallisce. */
+    private fun decodeAtLongSideLegacy(uri: Uri, wantedLongSide: Int): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        try {
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+                ?: run {
+                    android.util.Log.e("DepthWallpaper", "openInputStream nullo per uri=$uri")
+                    return null
+                }
+        } catch (e: Throwable) {
+            android.util.Log.e("DepthWallpaper", "Errore leggendo i bounds di uri=$uri", e)
+            return null
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            android.util.Log.e(
+                "DepthWallpaper",
+                "BitmapFactory non ha riconosciuto il formato di uri=$uri (mimeType=${bounds.outMimeType})"
+            )
+            return null
+        }
 
         val srcLong = maxOf(bounds.outWidth, bounds.outHeight)
         // Il piu' grande dimezzamento che lascia comunque almeno i pixel richiesti.
@@ -282,6 +423,56 @@ class MainActivity : ComponentActivity() {
     private class UpscaleSource(val bitmap: Bitmap, val targetLongSide: Int)
 
     /**
+     * Legge solo le dimensioni originali del file (senza decodificarne tutti i pixel),
+     * con la stessa strategia "ImageDecoder prima, BitmapFactory come fallback" di
+     * decodeAtLongSide: cosi' anche l'Upscaling AI non si blocca sugli stessi casi
+     * (foto cloud-only non scaricate, ecc.) risolti li'.
+     */
+    private fun probeImageSize(uri: Uri): Pair<Int, Int>? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                var w = 0
+                var h = 0
+                val source = ImageDecoder.createSource(contentResolver, uri)
+                val probe = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                    w = info.size.width
+                    h = info.size.height
+                    // Ci serve solo la dimensione originale (letta sopra da "info"),
+                    // non i pixel: chiediamo la bitmap piu' piccola possibile.
+                    decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                    decoder.setTargetSize(1, 1)
+                }
+                probe.recycle()
+                if (w > 0 && h > 0) return w to h
+            } catch (e: Throwable) {
+                android.util.Log.w("DepthWallpaper", "ImageDecoder non ha letto le dimensioni di uri=$uri", e)
+            }
+        }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        try {
+            contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
+        } catch (e: Throwable) {
+            return null
+        }
+        if (bounds.outWidth > 0 && bounds.outHeight > 0) return bounds.outWidth to bounds.outHeight
+
+        // Stesso problema di decodeAtLongSide: EXIF con dimensioni incoerenti rispetto
+        // ai dati JPEG veri e propri (tipico di export Snapseed). Si ripulisce e riprova.
+        return try {
+            val raw = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            val stripped = stripExifSegment(raw)
+            if (stripped.size == raw.size) return null
+            val strippedBounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(stripped, 0, stripped.size, strippedBounds)
+            if (strippedBounds.outWidth > 0 && strippedBounds.outHeight > 0) {
+                strippedBounds.outWidth to strippedBounds.outHeight
+            } else null
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    /**
      * Prepara la sorgente dell'Upscaling AI rileggendo il file ORIGINALE. Due cose che
      * prima non succedevano: il target finale viene calcolato sulle dimensioni vere del
      * file (quindi l'upscale non puo' piu' consegnare un'immagine piu' piccola della foto
@@ -290,11 +481,9 @@ class MainActivity : ComponentActivity() {
      * Da chiamare fuori dal thread UI.
      */
     private fun loadUpscaleSource(uri: Uri): UpscaleSource? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) } ?: return null
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        val (origW, origH) = probeImageSize(uri) ?: return null
 
-        val origLong = maxOf(bounds.outWidth, bounds.outHeight)
+        val origLong = maxOf(origW, origH)
         val target = Upscaler.targetLongSideFor(origLong)
         // Mai oltre l'originale: ingrandire prima dell'inferenza darebbe alla rete
         // pixel gia' interpolati, cioe' dettaglio finto al posto di dettaglio vero.

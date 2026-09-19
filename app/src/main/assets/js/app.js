@@ -111,7 +111,7 @@
     photoDataUrl: null,
     bgDim: 0,
     linkFgToBg: false,
-    clock: { enabled: true, mode: "time", customText: "", format: "24", style: defaultStyle(150, 0.30, true) },
+    clock: { enabled: true, mode: "time", customText: "", format: "24", centerDots: false, style: defaultStyle(150, 0.30, true) },
     date: { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.38, false) },
   };
 
@@ -157,12 +157,16 @@
     const h = now.getHours();
     const m = now.getMinutes();
     const h12 = h % 12 === 0 ? 12 : h % 12;
-    // Ore e minuti attaccati, senza alcun separatore (ne' ":" ne' spazio).
+    // Ore e minuti attaccati, senza alcun separatore (ne' ":" ne' spazio), a meno
+    // che i "puntini centrali" non siano attivi: in quel caso si inserisce un ':'
+    // letterale, che drawTextLayer riconosce come segnaposto per i due puntini
+    // disegnati a parte (non come glifo del font). Specchio di DepthRenderer.kt.
+    const sep = c.centerDots ? ":" : "";
     switch (c.format) {
-      case "24short": return h + pad2(m);
-      case "12": return h12 + pad2(m);
-      case "12ampm": return h12 + pad2(m) + (h < 12 ? " AM" : " PM");
-      default: return pad2(h) + pad2(m);
+      case "24short": return h + sep + pad2(m);
+      case "12": return h12 + sep + pad2(m);
+      case "12ampm": return h12 + sep + pad2(m) + (h < 12 ? " AM" : " PM");
+      default: return pad2(h) + sep + pad2(m);
     }
   }
 
@@ -181,45 +185,74 @@
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
 
-  function measureTracked(context, text, tracking) {
+  // --- puntini centrali (":") -------------------------------------------------
+  // Il ':' non e' mai un vero glifo del font: se dotsForColon e' attivo viene
+  // sempre sostituito da due cerchi disegnati a parte, cosi' il risultato e'
+  // identico su qualunque font. Proporzioni ricavate dalla larghezza della
+  // cifra "0", specchio di DepthRenderer.kt (dotSlotWidth/dotRadius/dotOffset).
+  function dotSlotWidth(context) { return context.measureText("0").width * 0.85; }
+  function dotRadius(context) { return context.measureText("0").width * 0.16; }
+  function dotOffset(context) { return context.measureText("0").width * 0.30; }
+
+  function drawDot(context, cx, cy, r, mode) {
+    context.beginPath();
+    context.arc(cx, cy, r, 0, Math.PI * 2);
+    if (mode === "stroke") context.stroke(); else context.fill();
+  }
+
+  function measureTracked(context, text, tracking, dotsForColon) {
     if (!text) return 0;
-    if (!tracking) return context.measureText(text).width;
+    const hasMarker = dotsForColon && text.indexOf(":") !== -1;
+    if (!tracking && !hasMarker) return context.measureText(text).width;
     let total = 0;
-    for (const ch of text) total += context.measureText(ch).width;
+    for (const ch of text) {
+      total += (hasMarker && ch === ":") ? dotSlotWidth(context) : context.measureText(ch).width;
+    }
     return total + tracking * (text.length - 1);
   }
 
-  function drawTrackedLine(context, text, y, tracking, mode) {
+  function drawTrackedLine(context, text, y, tracking, mode, dotsForColon) {
+    const hasMarker = dotsForColon && text.indexOf(":") !== -1;
     const paint = mode === "stroke" ? context.strokeText.bind(context) : context.fillText.bind(context);
-    if (!tracking) {
+    if (!tracking && !hasMarker) {
       context.textAlign = "center";
       paint(text, 0, y);
       return;
     }
     context.textAlign = "left";
-    let x = -measureTracked(context, text, tracking) / 2;
+    let x = -measureTracked(context, text, tracking, dotsForColon) / 2;
     for (const ch of text) {
-      paint(ch, x, y);
-      x += context.measureText(ch).width + tracking;
+      if (hasMarker && ch === ":") {
+        const slot = dotSlotWidth(context);
+        const cx = x + slot / 2;
+        const r = dotRadius(context);
+        const off = dotOffset(context);
+        drawDot(context, cx, y - off, r, mode);
+        drawDot(context, cx, y + off, r, mode);
+        x += slot + tracking;
+      } else {
+        paint(ch, x, y);
+        x += context.measureText(ch).width + tracking;
+      }
     }
   }
 
-  function drawLines(context, lines, firstY, lineHeight, tracking, mode) {
+  function drawLines(context, lines, firstY, lineHeight, tracking, mode, dotsForColon) {
     let y = firstY;
     for (const line of lines) {
-      drawTrackedLine(context, line, y, tracking, mode);
+      drawTrackedLine(context, line, y, tracking, mode, dotsForColon);
       y += lineHeight;
     }
   }
 
-  function wrapLines(context, text, maxWidth, tracking) {
+  function wrapLines(context, text, maxWidth, tracking, dotsForColon) {
     const out = [];
     for (const raw of String(text).split("\n")) {
       const words = raw.split(" ");
       let current = "";
       for (const word of words) {
         const test = current ? current + " " + word : word;
-        if (measureTracked(context, test, tracking) > maxWidth && current) {
+        if (measureTracked(context, test, tracking, dotsForColon) > maxWidth && current) {
           out.push(current);
           current = word;
         } else {
@@ -246,7 +279,7 @@
    *  Disegna prima la sagoma (piena, bianca, senza sfocatura) su un canvas
    *  separato, poi la ridisegna una sola volta sul contesto principale con
    *  l'ombra attiva e sorgente resa quasi invisibile: cosi' resta solo l'ombra. */
-  function drawUnifiedShadow(context, lines, firstY, lineHeight, tracking, maxW, mode, strokeWidth, shadowColor, shadowBlur, shadowOffsetY) {
+  function drawUnifiedShadow(context, lines, firstY, lineHeight, tracking, maxW, mode, strokeWidth, shadowColor, shadowBlur, shadowOffsetY, dotsForColon) {
     if (maxW <= 0) return;
     const pad = Math.ceil(strokeWidth + Math.abs(shadowBlur) + Math.abs(shadowOffsetY) + 6);
     const totalH = lines.length * lineHeight;
@@ -264,7 +297,7 @@
     octx.strokeStyle = "#fff";
     if (strokeWidth > 0) octx.lineWidth = strokeWidth;
     octx.translate(cw / 2, totalH / 2 + pad);
-    drawLines(octx, lines, firstY, lineHeight, tracking, mode);
+    drawLines(octx, lines, firstY, lineHeight, tracking, mode, dotsForColon);
 
     context.save();
     context.shadowColor = shadowColor;
@@ -318,7 +351,7 @@
   }
 
   /** Disegna un livello di testo e restituisce il riquadro occupato (frazioni 0..1). */
-  function drawTextLayer(context, w, h, style, text, multiline) {
+  function drawTextLayer(context, w, h, style, text, multiline, dotsForColon) {
     if (!text) return null;
     const k = w / CANVAS_W;
     let size = style.size * k;
@@ -346,7 +379,7 @@
     // il font scelto.
     let effK = k;
     if (!multiline) {
-      const naturalW = measureTracked(context, String(text), tracking) * sx;
+      const naturalW = measureTracked(context, String(text), tracking, dotsForColon) * sx;
       const maxAllowed = w * 0.94;
       if (naturalW > maxAllowed && naturalW > 0) {
         const fit = maxAllowed / naturalW;
@@ -361,12 +394,12 @@
     if (style.rotation) context.rotate((style.rotation * Math.PI) / 180);
     context.scale(sx, sy);
 
-    const lines = multiline ? wrapLines(context, text, (w * 0.92) / sx, tracking) : [String(text)];
+    const lines = multiline ? wrapLines(context, text, (w * 0.92) / sx, tracking, dotsForColon) : [String(text)];
     const lineHeight = size * 1.12;
     const firstY = (-(lines.length - 1) * lineHeight) / 2;
 
     let maxW = 0;
-    for (const line of lines) maxW = Math.max(maxW, measureTracked(context, line, tracking));
+    for (const line of lines) maxW = Math.max(maxW, measureTracked(context, line, tracking, dotsForColon));
 
     let shadowPending = style.shadowOpacity > 0;
     function applyShadowIfPending() {
@@ -396,26 +429,26 @@
     // --- alone morbido ---
     if (style.glowWidth > 0) {
       const gw = style.glowWidth * effK;
-      drawUnifiedShadow(context, lines, firstY, lineHeight, tracking, maxW, "stroke", gw * 2, style.glowColor, gw * 1.6, 0);
+      drawUnifiedShadow(context, lines, firstY, lineHeight, tracking, maxW, "stroke", gw * 2, style.glowColor, gw * 1.6, 0, dotsForColon);
       context.strokeStyle = style.glowColor;
       context.lineWidth = gw * 2;
-      drawLines(context, lines, firstY, lineHeight, tracking, "stroke");
+      drawLines(context, lines, firstY, lineHeight, tracking, "stroke", dotsForColon);
     }
 
     // --- contorno netto ---
     if (style.outlineWidth > 0) {
       if (shadowPending) {
-        drawUnifiedShadow(context, lines, firstY, lineHeight, tracking, maxW, "stroke", style.outlineWidth * effK * 2, `rgba(0,0,0,${style.shadowOpacity})`, style.shadowBlur * effK, style.shadowOffsetY * effK);
+        drawUnifiedShadow(context, lines, firstY, lineHeight, tracking, maxW, "stroke", style.outlineWidth * effK * 2, `rgba(0,0,0,${style.shadowOpacity})`, style.shadowBlur * effK, style.shadowOffsetY * effK, dotsForColon);
         shadowPending = false;
       }
       context.strokeStyle = style.outlineColor;
       context.lineWidth = style.outlineWidth * effK * 2;
-      drawLines(context, lines, firstY, lineHeight, tracking, "stroke");
+      drawLines(context, lines, firstY, lineHeight, tracking, "stroke", dotsForColon);
     }
 
     // --- riempimento ---
     if (shadowPending) {
-      drawUnifiedShadow(context, lines, firstY, lineHeight, tracking, maxW, "fill", 0, `rgba(0,0,0,${style.shadowOpacity})`, style.shadowBlur * effK, style.shadowOffsetY * effK);
+      drawUnifiedShadow(context, lines, firstY, lineHeight, tracking, maxW, "fill", 0, `rgba(0,0,0,${style.shadowOpacity})`, style.shadowBlur * effK, style.shadowOffsetY * effK, dotsForColon);
       shadowPending = false;
     }
     if (style.gradient && maxW > 0) {
@@ -440,7 +473,7 @@
     } else {
       context.fillStyle = style.color;
     }
-    drawLines(context, lines, firstY, lineHeight, tracking, "fill");
+    drawLines(context, lines, firstY, lineHeight, tracking, "fill", dotsForColon);
 
     context.restore();
 
@@ -474,7 +507,7 @@
     }
 
     const clockBox = state.clock.enabled
-      ? drawTextLayer(context, w, h, state.clock.style, clockString(), state.clock.mode === "custom")
+      ? drawTextLayer(context, w, h, state.clock.style, clockString(), state.clock.mode === "custom", state.clock.centerDots)
       : null;
 
     const dateBox = state.date.enabled
@@ -1717,6 +1750,7 @@
 
   bindCheck("clockEnabledCheck", (v) => { state.clock.enabled = v; });
   bindSelect("clockFormatSelect", (v) => { state.clock.format = v; });
+  bindCheck("clockCenterDotsCheck", (v) => { state.clock.centerDots = v; });
 
   document.getElementById("clockResetBtn").addEventListener("click", () => {
     state.clock.style = defaultStyle(150, 0.30, true);
@@ -1798,7 +1832,7 @@
     resetAllArmed = false;
     clearTimeout(resetAllTimer);
 
-    state.clock = { enabled: true, mode: "time", customText: "", format: "24", style: defaultStyle(150, 0.30, true) };
+    state.clock = { enabled: true, mode: "time", customText: "", format: "24", centerDots: false, style: defaultStyle(150, 0.30, true) };
     state.date = { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.38, false) };
     state.bgDim = 0;
     state.linkFgToBg = false;
@@ -1807,6 +1841,7 @@
 
     document.getElementById("clockEnabledCheck").checked = true;
     document.getElementById("clockFormatSelect").value = "24";
+    document.getElementById("clockCenterDotsCheck").checked = false;
     syncClockMode();
     document.getElementById("dateEnabledCheck").checked = true;
     document.getElementById("dateFormatSelect").value = "full";
@@ -2044,6 +2079,7 @@
         mode: state.clock.mode,
         customText: state.clock.customText,
         format: state.clock.format,
+        centerDots: state.clock.centerDots,
         style: styleJson(state.clock.style),
       },
       date: {
@@ -2095,6 +2131,7 @@
         state.clock.mode = cfg.clock.mode || "time";
         state.clock.customText = cfg.clock.customText || "";
         state.clock.format = cfg.clock.format || "24";
+        state.clock.centerDots = !!cfg.clock.centerDots;
         if (cfg.clock.style) Object.assign(state.clock.style, cfg.clock.style);
         state.clock.style.fontKey = normalizeFontKey(state.clock.style.fontKey);
       }
@@ -2117,6 +2154,7 @@
 
       document.getElementById("clockEnabledCheck").checked = state.clock.enabled;
       document.getElementById("clockFormatSelect").value = state.clock.format;
+      document.getElementById("clockCenterDotsCheck").checked = state.clock.centerDots;
       // Una configurazione salvata in precedenza potrebbe avere mode:"custom":
       // l'interfaccia non lo offre piu', quindi si ricade sempre sull'ora corrente.
       syncClockMode();
