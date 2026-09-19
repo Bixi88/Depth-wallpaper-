@@ -3,7 +3,9 @@ package com.depthwallpaper.creator
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Build
+import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
+import org.tensorflow.lite.Tensor
 import org.tensorflow.lite.nnapi.NnApiDelegate
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -100,7 +102,13 @@ object Upscaler {
         val delegate: NnApiDelegate?,
         val tileIn: Int,
         val tileOut: Int,
-        val scale: Int
+        val scale: Int,
+        /** Tabella pixel (0..255) -> byte da scrivere nel tensore di input quando il modello
+         *  e' quantizzato (UINT8/INT8, es. la versione w8a8); null se l'input e' float32. */
+        val inLut: ByteArray?,
+        /** Tabella byte di output (0..255) -> canale 0..255 quando l'output e' quantizzato;
+         *  null se l'output e' float32. */
+        val outLut: IntArray?
     )
 
     private val loadedModels = HashMap<UpscaleModel, LoadedModel>()
@@ -157,9 +165,59 @@ object Upscaler {
             scale = max(1, tileOut / tileIn)
         }
 
-        val loaded = LoadedModel(interp, delegate, tileIn, tileOut, scale)
+        // Il modello "Qualita'" (w8a8) e' quantizzato: input/output UINT8 (1 byte per canale)
+        // invece di float32 (4 byte). Il buffer va dimensionato e riempito di conseguenza,
+        // altrimenti TFLite rifiuta la copia ("...tensor (image) with 49152 bytes from a
+        // Java Buffer with 196608 bytes").
+        val luts = try {
+            Pair(
+                buildInputLut(interp.getInputTensor(0)),
+                buildOutputLut(interp.getOutputTensor(0))
+            )
+        } catch (e: Throwable) {
+            interp.close()
+            delegate?.close()
+            throw e
+        }
+
+        val loaded = LoadedModel(interp, delegate, tileIn, tileOut, scale, luts.first, luts.second)
         loadedModels[model] = loaded
         return loaded
+    }
+
+    private fun isQuantized(t: Tensor): Boolean = when (t.dataType()) {
+        DataType.FLOAT32 -> false
+        DataType.UINT8, DataType.INT8 -> true
+        else -> throw UnavailableException("Tipo di tensore del modello non supportato: ${t.dataType()}")
+    }
+
+    /** LUT pixel(0..255) -> valore quantizzato dell'input, usando scale/zeroPoint dichiarati
+     *  dal modello. Null se il tensore di input e' float32. */
+    private fun buildInputLut(t: Tensor): ByteArray? {
+        if (!isQuantized(t)) return null
+        val qp = t.quantizationParams()
+        val scale = if (qp.scale > 0f) qp.scale else 1f / 255f
+        val zp = qp.zeroPoint
+        val signed = t.dataType() == DataType.INT8
+        val lo = if (signed) -128 else 0
+        val hi = if (signed) 127 else 255
+        return ByteArray(256) { p ->
+            val q = ((p / 255f) / scale + zp).roundToInt().coerceIn(lo, hi)
+            q.toByte()
+        }
+    }
+
+    /** LUT byte di output -> canale 0..255. Null se il tensore di output e' float32. */
+    private fun buildOutputLut(t: Tensor): IntArray? {
+        if (!isQuantized(t)) return null
+        val qp = t.quantizationParams()
+        val scale = if (qp.scale > 0f) qp.scale else 1f / 255f
+        val zp = qp.zeroPoint
+        val signed = t.dataType() == DataType.INT8
+        return IntArray(256) { idx ->
+            val q = if (signed) idx.toByte().toInt() else idx
+            (((q - zp) * scale) * 255f).roundToInt().coerceIn(0, 255)
+        }
     }
 
     private fun loadModelFile(context: Context, assetPath: String): MappedByteBuffer {
@@ -282,10 +340,15 @@ object Upscaler {
 
         // Una sola banda di output alla volta: alta quanto il nucleo di una riga di tile.
         val band = IntArray(outW * coreOut)
-        val tileFloats = FloatArray(tileOut * tileOut * 3)
+        val quantOut = loaded.outLut != null
+        val tileFloats = FloatArray(if (quantOut) 0 else tileOut * tileOut * 3)
+        val tileBytes = ByteArray(if (quantOut) tileOut * tileOut * 3 else 0)
 
-        val inputBuffer = ByteBuffer.allocateDirect(tileIn * tileIn * 3 * 4).order(ByteOrder.nativeOrder())
-        val outputBuffer = ByteBuffer.allocateDirect(tileOut * tileOut * 3 * 4).order(ByteOrder.nativeOrder())
+        // float32 = 4 byte per canale, UINT8/INT8 (modello quantizzato) = 1 byte.
+        val inBytesPer = if (loaded.inLut != null) 1 else 4
+        val outBytesPer = if (quantOut) 1 else 4
+        val inputBuffer = ByteBuffer.allocateDirect(tileIn * tileIn * 3 * inBytesPer).order(ByteOrder.nativeOrder())
+        val outputBuffer = ByteBuffer.allocateDirect(tileOut * tileOut * 3 * outBytesPer).order(ByteOrder.nativeOrder())
 
         // Prima riga di output non ancora consumata: l'ultima banda e' allineata al bordo
         // inferiore e quindi si sovrappone alla precedente, le righe gia' emesse si saltano.
@@ -297,11 +360,11 @@ object Upscaler {
             if (bandH <= 0) continue
 
             for (cx in xs) {
-                fillInputTile(inputBuffer, srcPixels, srcW, srcH, cx - overlap, cy - overlap, tileIn)
+                fillInputTile(inputBuffer, loaded.inLut, srcPixels, srcW, srcH, cx - overlap, cy - overlap, tileIn)
                 outputBuffer.rewind()
                 interp.run(inputBuffer, outputBuffer)
                 writeTileCoreIntoBand(
-                    outputBuffer, tileFloats, band, outW, bandH,
+                    outputBuffer, loaded.outLut, tileFloats, tileBytes, band, outW, bandH,
                     tileOut, overlapOut, coreOut, cx * scale
                 )
                 doneTiles++
@@ -380,10 +443,10 @@ object Upscaler {
         return starts
     }
 
-    /** Copia nel buffer di input (float32 normalizzato 0..1, NHWC) la finestra
+    /** Copia nel buffer di input (float32 normalizzato 0..1 oppure byte quantizzati, NHWC) la finestra
      *  winX0..winX0+tile, con replica del bordo (clamp) per i pixel fuori immagine. */
     private fun fillInputTile(
-        buffer: ByteBuffer, srcPixels: IntArray, srcW: Int, srcH: Int,
+        buffer: ByteBuffer, lut: ByteArray?, srcPixels: IntArray, srcW: Int, srcH: Int,
         winX0: Int, winY0: Int, tile: Int
     ) {
         buffer.rewind()
@@ -393,9 +456,16 @@ object Upscaler {
             for (col in 0 until tile) {
                 val sx = (winX0 + col).coerceIn(0, srcW - 1)
                 val px = srcPixels[rowBase + sx]
-                buffer.putFloat(((px shr 16) and 0xFF) / 255f) // R
-                buffer.putFloat(((px shr 8) and 0xFF) / 255f)  // G
-                buffer.putFloat((px and 0xFF) / 255f)          // B
+                if (lut != null) {
+                    // modello quantizzato: 1 byte per canale
+                    buffer.put(lut[(px shr 16) and 0xFF]) // R
+                    buffer.put(lut[(px shr 8) and 0xFF])  // G
+                    buffer.put(lut[px and 0xFF])          // B
+                } else {
+                    buffer.putFloat(((px shr 16) and 0xFF) / 255f) // R
+                    buffer.putFloat(((px shr 8) and 0xFF) / 255f)  // G
+                    buffer.putFloat((px and 0xFF) / 255f)          // B
+                }
             }
         }
         buffer.rewind()
@@ -404,12 +474,12 @@ object Upscaler {
     /** Scarta la cornice di contesto dall'output della tile e incolla solo il "nucleo"
      *  nella banda corrente (alta esattamente quanto il nucleo di una riga di tile). */
     private fun writeTileCoreIntoBand(
-        buffer: ByteBuffer, floats: FloatArray, band: IntArray,
+        buffer: ByteBuffer, lut: IntArray?, floats: FloatArray, bytes: ByteArray, band: IntArray,
         outW: Int, bandH: Int,
         tileOut: Int, overlapOut: Int, coreOut: Int, dstX0: Int
     ) {
         buffer.rewind()
-        buffer.asFloatBuffer().get(floats)
+        if (lut != null) buffer.get(bytes) else buffer.asFloatBuffer().get(floats)
 
         val h = min(coreOut, bandH)
         val w = min(coreOut, outW - dstX0)
@@ -424,9 +494,18 @@ object Upscaler {
                 val srcCol = col + overlapOut
                 if (srcCol >= tileOut) break
                 val idx = srcRowBase + srcCol * 3
-                val r = (floats[idx].coerceIn(0f, 1f) * 255f).roundToInt()
-                val g = (floats[idx + 1].coerceIn(0f, 1f) * 255f).roundToInt()
-                val b = (floats[idx + 2].coerceIn(0f, 1f) * 255f).roundToInt()
+                val r: Int
+                val g: Int
+                val b: Int
+                if (lut != null) {
+                    r = lut[bytes[idx].toInt() and 0xFF]
+                    g = lut[bytes[idx + 1].toInt() and 0xFF]
+                    b = lut[bytes[idx + 2].toInt() and 0xFF]
+                } else {
+                    r = (floats[idx].coerceIn(0f, 1f) * 255f).roundToInt()
+                    g = (floats[idx + 1].coerceIn(0f, 1f) * 255f).roundToInt()
+                    b = (floats[idx + 2].coerceIn(0f, 1f) * 255f).roundToInt()
+                }
                 band[dstRowBase + dstX0 + col] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
             }
         }
