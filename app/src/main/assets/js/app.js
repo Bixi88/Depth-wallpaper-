@@ -194,6 +194,19 @@
   function dotRadius(context) { return context.measureText("0").width * 0.16; }
   function dotOffset(context) { return context.measureText("0").width * 0.30; }
 
+  // I puntini vanno centrati sul centro OTTICO della cifra "0", non sulla baseline
+  // "y" usata per fillText/strokeText: le cifre stanno sopra la baseline, quindi
+  // centrarli su "y" li fa apparire troppo in basso. actualBoundingBoxAscent/Descent
+  // danno l'ingombro reale della cifra rispetto alla baseline; il loro punto medio
+  // e' l'offset verticale da sommare a "y" per trovare il vero centro cifra.
+  // Specchio di digitCenterOffset in DepthRenderer.kt.
+  function digitCenterOffset(context) {
+    const m = context.measureText("0");
+    const asc = m.actualBoundingBoxAscent || 0;
+    const desc = m.actualBoundingBoxDescent || 0;
+    return (desc - asc) / 2;
+  }
+
   function drawDot(context, cx, cy, r, mode) {
     context.beginPath();
     context.arc(cx, cy, r, 0, Math.PI * 2);
@@ -227,8 +240,9 @@
         const cx = x + slot / 2;
         const r = dotRadius(context);
         const off = dotOffset(context);
-        drawDot(context, cx, y - off, r, mode);
-        drawDot(context, cx, y + off, r, mode);
+        const centerY = y + digitCenterOffset(context);
+        drawDot(context, cx, centerY - off, r, mode);
+        drawDot(context, cx, centerY + off, r, mode);
         x += slot + tracking;
       } else {
         paint(ch, x, y);

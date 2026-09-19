@@ -9,6 +9,7 @@ import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -417,6 +418,17 @@ object DepthRenderer {
     private fun dotRadius(paint: Paint): Float = paint.measureText("0") * 0.16f
     private fun dotOffset(paint: Paint): Float = paint.measureText("0") * 0.30f
 
+    // I puntini vanno centrati sul centro OTTICO della cifra (es. "0"), non sulla
+    // baseline: le cifre stanno sopra la baseline, quindi centrarli sulla baseline
+    // li fa apparire troppo in basso. getTextBounds da' il bounding box reale della
+    // cifra rispetto alla baseline (top negativo = sopra), il cui punto medio e'
+    // l'offset verticale da sommare a baselineY per trovare il vero centro cifra.
+    private val digitBoundsRect = Rect()
+    private fun digitCenterOffset(paint: Paint): Float {
+        paint.getTextBounds("0", 0, 1, digitBoundsRect)
+        return (digitBoundsRect.top + digitBoundsRect.bottom) / 2f
+    }
+
     private fun drawLines(
         canvas: Canvas,
         paint: Paint,
@@ -460,8 +472,9 @@ object DepthRenderer {
                 val cx = x + slot / 2f
                 val r = dotRadius(paint)
                 val off = dotOffset(paint)
-                canvas.drawCircle(cx, baselineY - off, r, paint)
-                canvas.drawCircle(cx, baselineY + off, r, paint)
+                val centerY = baselineY + digitCenterOffset(paint)
+                canvas.drawCircle(cx, centerY - off, r, paint)
+                canvas.drawCircle(cx, centerY + off, r, paint)
                 x += slot + tracking
             } else {
                 val s = ch.toString()
@@ -516,8 +529,9 @@ object DepthRenderer {
                         val cx = x + slot / 2f
                         val r = dotRadius(paint)
                         val off = dotOffset(paint)
-                        path.addCircle(cx, baselineY - off, r, Path.Direction.CW)
-                        path.addCircle(cx, baselineY + off, r, Path.Direction.CW)
+                        val centerY = baselineY + digitCenterOffset(paint)
+                        path.addCircle(cx, centerY - off, r, Path.Direction.CW)
+                        path.addCircle(cx, centerY + off, r, Path.Direction.CW)
                         x += slot + tracking
                     } else {
                         val s = ch.toString()
