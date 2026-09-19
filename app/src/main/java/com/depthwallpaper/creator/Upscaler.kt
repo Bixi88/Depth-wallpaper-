@@ -164,7 +164,39 @@ object Upscaler {
                 built = null
             }
         }
-        val interp = built ?: Interpreter(modelBuffer, options)
+        var interp = built ?: Interpreter(modelBuffer, options)
+
+        // NNAPI non e' sempre piu' veloce della CPU (su alcuni chip/driver puo' anzi esserlo
+        // molto meno). Per non tirare a indovinare si misura una tile vera su entrambi i
+        // backend e si tiene il piu' veloce: stesso modello, stessi pesi, nessuna perdita
+        // di qualita'. NNAPI resta preferito a parita' di tempo (consuma meno).
+        var msPerTile = benchmarkMs(interp)
+        var backendName = if (delegate != null) "NNAPI" else "CPU"
+        var versus = ""
+        if (delegate != null) {
+            var cpu: Interpreter? = null
+            try {
+                val c = Interpreter(modelBuffer, options)
+                cpu = c
+                val cpuMs = benchmarkMs(c)
+                if (cpuMs >= 0 && (msPerTile < 0 || cpuMs < msPerTile * 0.9)) {
+                    versus = " \u00b7 NNAPI $msPerTile ms"
+                    try { interp.close() } catch (_: Throwable) {}
+                    try { delegate?.close() } catch (_: Throwable) {}
+                    delegate = null
+                    interp = c
+                    cpu = null
+                    msPerTile = cpuMs
+                    backendName = "CPU"
+                } else if (cpuMs >= 0) {
+                    versus = " \u00b7 CPU $cpuMs ms"
+                }
+            } catch (e: Throwable) {
+                // il confronto e' solo diagnostico: se fallisce si tiene NNAPI
+            } finally {
+                try { cpu?.close() } catch (_: Throwable) {}
+            }
+        }
 
         var tileIn = 128
         var tileOut = 512
@@ -192,17 +224,8 @@ object Upscaler {
             throw e
         }
 
-        // Diagnostica: la prima esecuzione (che include l'inizializzazione) si scarta, la
-        // seconda e' il tempo reale di una tile. Serve a capire se il modello sta girando
-        // su un acceleratore (tile veloci) o sulla CPU (tile lente).
-        val msPerTile = try {
-            timedRunMs(interp)
-            timedRunMs(interp)
-        } catch (e: Throwable) {
-            -1L
-        }
-        val backend = (if (delegate != null) "NNAPI" else "CPU") +
-            (if (msPerTile >= 0) " \u00b7 $msPerTile ms/tile" else "")
+        val backend = backendName +
+            (if (msPerTile >= 0) " \u00b7 $msPerTile ms/tile" else "") + versus
 
         val loaded = LoadedModel(interp, delegate, tileIn, tileOut, scale, luts.first, luts.second, backend)
         loadedModels[model] = loaded
@@ -212,6 +235,15 @@ object Upscaler {
     /** Una inferenza su input nullo, con buffer dimensionati dai tensori stessi. */
     private fun warmUp(interp: Interpreter) {
         timedRunMs(interp)
+    }
+
+    /** Tempo in ms di una tile vera: la prima esecuzione (che include l'inizializzazione)
+     *  si scarta, la seconda e' la misura. -1 se l'esecuzione fallisce. */
+    private fun benchmarkMs(interp: Interpreter): Long = try {
+        timedRunMs(interp)
+        timedRunMs(interp)
+    } catch (e: Throwable) {
+        -1L
     }
 
     /** Come warmUp, ma restituisce i millisecondi impiegati da una tile. */
