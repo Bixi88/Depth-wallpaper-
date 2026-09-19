@@ -1211,8 +1211,24 @@
     upscaleProgressPct.textContent = p + "%";
   }
 
+  // Diagnostica: backend usato dal modello (NNAPI/CPU e ms per tile), mostrato
+  // nell'overlay durante l'elaborazione e nel messaggio finale.
+  const upscaleLoadingLabel = document.getElementById("upscaleLoadingLabel");
+  let upscaleInfoFinal = "";
+  window.onUpscaleInfo = function (text, isFinal) {
+    if (isFinal) {
+      upscaleInfoFinal = text;
+    } else if (upscaleLoadingLabel) {
+      upscaleLoadingLabel.textContent = "Upscaling AI in corso\u2026 (" + text + ")";
+    }
+  };
+
   function setUpscaleBusy(busy) {
     upscaleBusy = busy;
+    if (busy) {
+      upscaleInfoFinal = "";
+      if (upscaleLoadingLabel) upscaleLoadingLabel.textContent = "Upscaling AI in corso\u2026";
+    }
     if (busy) setUpscaleProgress(0);
     upscaleLoading.classList.toggle("hidden", !busy);
     btnUpscale.disabled = busy;
@@ -1278,9 +1294,10 @@
     const hadSubject = !!state.fg.img;
     setBackground(dataUrl, true, true);
     btnSaveUpscaled.classList.remove("hidden");
+    const info = upscaleInfoFinal ? " (" + upscaleInfoFinal + ")" : "";
     showToast(hadSubject
-      ? "Upscaling AI completato \u2713 Soggetto rimosso: rifallo dal tab Soggetto"
-      : "Upscaling AI completato \u2713");
+      ? "Upscaling AI completato \u2713" + info + " Soggetto rimosso: rifallo dal tab Soggetto"
+      : "Upscaling AI completato \u2713" + info);
   };
 
   // ===========================================================================

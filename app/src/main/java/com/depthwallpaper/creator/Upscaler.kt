@@ -108,7 +108,10 @@ object Upscaler {
         val inLut: ByteArray?,
         /** Tabella byte di output (0..255) -> canale 0..255 quando l'output e' quantizzato;
          *  null se l'output e' float32. */
-        val outLut: IntArray?
+        val outLut: IntArray?,
+        /** Descrizione leggibile di come gira il modello, es. "NNAPI · 85 ms/tile" oppure
+         *  "CPU · 180 ms/tile" (tempo misurato su una tile vera al caricamento). */
+        val backend: String
     )
 
     private val loadedModels = HashMap<UpscaleModel, LoadedModel>()
@@ -189,16 +192,35 @@ object Upscaler {
             throw e
         }
 
-        val loaded = LoadedModel(interp, delegate, tileIn, tileOut, scale, luts.first, luts.second)
+        // Diagnostica: la prima esecuzione (che include l'inizializzazione) si scarta, la
+        // seconda e' il tempo reale di una tile. Serve a capire se il modello sta girando
+        // su un acceleratore (tile veloci) o sulla CPU (tile lente).
+        val msPerTile = try {
+            timedRunMs(interp)
+            timedRunMs(interp)
+        } catch (e: Throwable) {
+            -1L
+        }
+        val backend = (if (delegate != null) "NNAPI" else "CPU") +
+            (if (msPerTile >= 0) " \u00b7 $msPerTile ms/tile" else "")
+
+        val loaded = LoadedModel(interp, delegate, tileIn, tileOut, scale, luts.first, luts.second, backend)
         loadedModels[model] = loaded
         return loaded
     }
 
     /** Una inferenza su input nullo, con buffer dimensionati dai tensori stessi. */
     private fun warmUp(interp: Interpreter) {
+        timedRunMs(interp)
+    }
+
+    /** Come warmUp, ma restituisce i millisecondi impiegati da una tile. */
+    private fun timedRunMs(interp: Interpreter): Long {
         val inBuf = ByteBuffer.allocateDirect(interp.getInputTensor(0).numBytes()).order(ByteOrder.nativeOrder())
         val outBuf = ByteBuffer.allocateDirect(interp.getOutputTensor(0).numBytes()).order(ByteOrder.nativeOrder())
+        val t0 = System.nanoTime()
         interp.run(inBuf, outBuf)
+        return (System.nanoTime() - t0) / 1_000_000L
     }
 
     private fun isQuantized(t: Tensor): Boolean = when (t.dataType()) {
@@ -246,6 +268,16 @@ object Upscaler {
             }
         }
     }
+
+    /** Riga diagnostica sul backend in uso per questo modello (vedi LoadedModel.backend),
+     *  oppure null se il modello non e' caricabile. Va invocata fuori dal thread UI. */
+    fun backendLabel(context: Context, model: UpscaleModel): String? =
+        try { ensureInterpreter(context, model).backend } catch (e: Throwable) { null }
+
+    /** Riepilogo dell'ultimo upscale completato (backend, tile, ms/tile, secondi). */
+    @Volatile
+    var lastRunSummary: String = ""
+        private set
 
     /** Vero se l'asset del modello e' effettivamente incluso in questa build (utile per
      *  mostrare/nascondere l'opzione "Qualit\u00e0" nella UI senza dover tentare l'inferenza). */
@@ -308,6 +340,9 @@ object Upscaler {
         val tileIn = loaded.tileIn
         val tileOut = loaded.tileOut
         val scale = loaded.scale
+
+        val runStartNs = System.nanoTime()
+        var inferenceNs = 0L
 
         val srcW = src.width
         val srcH = src.height
@@ -378,7 +413,9 @@ object Upscaler {
             for (cx in xs) {
                 fillInputTile(inputBuffer, loaded.inLut, srcPixels, srcW, srcH, cx - overlap, cy - overlap, tileIn)
                 outputBuffer.rewind()
+                val t0 = System.nanoTime()
                 interp.run(inputBuffer, outputBuffer)
+                inferenceNs += System.nanoTime() - t0
                 writeTileCoreIntoBand(
                     outputBuffer, loaded.outLut, tileFloats, tileBytes, band, outW, bandH,
                     tileOut, overlapOut, coreOut, cx * scale
@@ -425,6 +462,10 @@ object Upscaler {
             }
         }
         if (accRows > 0) flushRow(dst, rowOut, accR, accG, accB, accRows, currentDstRow, dstW)
+
+        val totalSec = (System.nanoTime() - runStartNs) / 1_000_000_000.0
+        val avgMs = if (totalTiles > 0) inferenceNs / 1_000_000L / totalTiles else 0L
+        lastRunSummary = "${loaded.backend.substringBefore(' ')} \u00b7 $totalTiles tile \u00b7 $avgMs ms/tile \u00b7 ${totalSec.roundToInt()} s"
 
         return dst
     }

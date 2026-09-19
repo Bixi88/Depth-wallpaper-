@@ -540,6 +540,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Testo diagnostico sul backend dell'upscale: isFinal=false durante l'elaborazione
+     *  (mostrato nell'overlay), isFinal=true a fine lavoro (aggiunto al messaggio finale). */
+    private fun notifyUpscaleInfo(text: String, isFinal: Boolean) {
+        if (text.isEmpty()) return
+        runOnUiThread {
+            val safe = text.replace("\\", "\\\\").replace("'", "\\'")
+            webView.evaluateJavascript(
+                "window.onUpscaleInfo && window.onUpscaleInfo('$safe', $isFinal);",
+                null
+            )
+        }
+    }
+
     private fun notifyUpscaleProgress(percent: Int) {
         runOnUiThread {
             webView.evaluateJavascript(
@@ -760,6 +773,9 @@ class MainActivity : ComponentActivity() {
                     }
                     val bitmap = prepared.bitmap
 
+                    // Diagnostica: mostra subito (nell'overlay) se gira su NNAPI o su CPU.
+                    Upscaler.backendLabel(applicationContext, model)?.let { notifyUpscaleInfo(it, false) }
+
                     notifyUpscaleProgress(0)
                     var lastSentPercent = -1
                     val result = Upscaler.upscale(applicationContext, bitmap, prepared.targetLongSide, model) { fraction ->
@@ -781,6 +797,7 @@ class MainActivity : ComponentActivity() {
                     result.compress(Bitmap.CompressFormat.JPEG, 95, out)
                     result.recycle()
                     val b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                    notifyUpscaleInfo(Upscaler.lastRunSummary, true)
                     notifyUpscaleResult("data:image/jpeg;base64,$b64", null)
                 } catch (e: Upscaler.UnavailableException) {
                     notifyUpscaleResult(null, e.message ?: "Upscaling AI non disponibile su questo dispositivo")
