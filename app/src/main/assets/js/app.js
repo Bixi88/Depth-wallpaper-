@@ -33,7 +33,7 @@
     { key: "skyscraper", label: "Skyscraper Condensed", css: "'Skyscraper Condensed', sans-serif", bundled: true },
     { key: "sensationalSans", label: "Sensational Sans", css: "'Sensational Sans', sans-serif", bundled: true },
     // ATTENZIONE: file demo (uso personale) - vedi nota di licenza in style.css.
-    { key: "calcio", label: "Calcio (demo)", css: "'Calcio', sans-serif", bundled: true },
+    { key: "calcio", label: "Calcio", css: "'Calcio', sans-serif", bundled: true },
   ];
 
   /**
@@ -565,18 +565,135 @@
     if (btnCutout) btnCutout.classList.toggle("btn-locked", subjectLocked);
   }
 
+  // ---------------------------------------------------------------------------
+  // Ordine reale delle schede: usato per decidere la direzione dello slide
+  // (avanti = da destra verso sinistra, indietro = da sinistra verso destra) e
+  // la distanza percorsa dallo squircle nella barra delle schede.
+  // ---------------------------------------------------------------------------
+  const TAB_ORDER = ["media", "clock", "date", "bg", "fg"];
+  // Durata SEMPRE uguale sia per lo slide dei pannelli sia per lo squircle:
+  // e' proprio la durata costante a "sincronizzare" le due animazioni. I
+  // pannelli percorrono sempre la stessa distanza (una larghezza intera) e
+  // quindi vanno sempre alla stessa velocita' "normale", qualunque scheda si
+  // scelga. Lo squircle invece percorre una distanza diversa a seconda di
+  // quante schede separano il punto di partenza da quello di arrivo: nella
+  // stessa durata risulta percio' piu' lento su un tragitto breve (es. Media
+  // -> Orologio) e piu' veloce su un tragitto lungo (es. Media -> Soggetto).
+  const TAB_TRANSITION_MS = 300;
+
+  const tabsEl = document.getElementById("tabs");
+  const tabIndicator = document.getElementById("tabIndicator");
+  const panelSlider = document.getElementById("panelSlider");
+  const tabPanelsEl = document.getElementById("tab-panels");
+  let tabAnimBusy = false;
+
+  function moveIndicatorTo(btnEl, animate) {
+    if (!tabIndicator || !btnEl || !tabsEl) return;
+    const ico = btnEl.querySelector(".tab-ico");
+    if (!ico) return;
+    const tabsRect = tabsEl.getBoundingClientRect();
+    const icoRect = ico.getBoundingClientRect();
+    const x = icoRect.left - tabsRect.left + tabsEl.scrollLeft;
+    const y = icoRect.top - tabsRect.top + tabsEl.scrollTop;
+    if (animate) {
+      tabIndicator.style.transition = "transform " + TAB_TRANSITION_MS + "ms ease";
+    } else {
+      tabIndicator.style.transition = "none";
+    }
+    tabIndicator.style.transform = "translate(" + x + "px, " + y + "px)";
+    if (!animate) {
+      // forza il reflow cosi' la prossima transizione riparte da qui e non
+      // "eredita" lo stato senza transizione appena impostato
+      void tabIndicator.offsetWidth;
+      tabIndicator.style.transition = "";
+    }
+  }
+
+  function switchTab(btn) {
+    const newKey = btn.dataset.tab;
+    const oldBtn = document.querySelector(".tab-btn.active");
+    const oldKey = oldBtn ? oldBtn.dataset.tab : null;
+    if (oldKey === newKey || tabAnimBusy) return;
+
+    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+    btn.classList.add("active");
+    moveIndicatorTo(btn, true);
+
+    const oldPanel = oldKey ? document.getElementById("panel-" + oldKey) : null;
+    const newPanel = document.getElementById("panel-" + newKey);
+    if (!newPanel) return;
+
+    // Fallback senza animazione (prima apertura, o pannello mancante).
+    if (!oldPanel || oldPanel === newPanel || !panelSlider) {
+      document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+      newPanel.classList.add("active");
+      if (tabPanelsEl) tabPanelsEl.scrollTop = 0;
+      return;
+    }
+
+    const oldIndex = TAB_ORDER.indexOf(oldKey);
+    const newIndex = TAB_ORDER.indexOf(newKey);
+    const forward = newIndex > oldIndex;
+
+    tabAnimBusy = true;
+
+    const startHeight = oldPanel.offsetHeight;
+    panelSlider.style.overflow = "hidden";
+    panelSlider.style.height = startHeight + "px";
+
+    // Entrambi i pannelli coinvolti (SOLO quei due: si va sempre dritti dalla
+    // scheda di partenza a quella di arrivo, senza attraversare le sezioni
+    // intermedie) diventano assoluti e sovrapposti per poter scorrere.
+    [oldPanel, newPanel].forEach((p) => {
+      p.classList.add("active");
+      p.style.position = "absolute";
+      p.style.top = "0";
+      p.style.left = "0";
+      p.style.width = "100%";
+      p.style.transition = "none";
+    });
+    oldPanel.style.transform = "translateX(0)";
+    newPanel.style.transform = forward ? "translateX(100%)" : "translateX(-100%)";
+
+    // forza il reflow prima di leggere l'altezza finale e avviare la transizione
+    void newPanel.offsetHeight;
+    const endHeight = newPanel.scrollHeight;
+
+    requestAnimationFrame(() => {
+      const t = "transform " + TAB_TRANSITION_MS + "ms ease";
+      oldPanel.style.transition = t;
+      newPanel.style.transition = t;
+      panelSlider.style.transition = "height " + TAB_TRANSITION_MS + "ms ease";
+      oldPanel.style.transform = forward ? "translateX(-100%)" : "translateX(100%)";
+      newPanel.style.transform = "translateX(0)";
+      panelSlider.style.height = endHeight + "px";
+    });
+
+    setTimeout(() => {
+      oldPanel.classList.remove("active");
+      oldPanel.style.cssText = "";
+      newPanel.style.cssText = "";
+      panelSlider.style.cssText = "";
+      if (tabPanelsEl) tabPanelsEl.scrollTop = 0;
+      tabAnimBusy = false;
+    }, TAB_TRANSITION_MS + 30);
+  }
+
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       if (subjectLocked && btn.dataset.tab === "fg") {
         showToast("Decidi prima se applicare l'Upscaling AI alla foto");
         return;
       }
-      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
-      document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
-      btn.classList.add("active");
-      document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
-      document.getElementById("tab-panels").scrollTop = 0;
+      switchTab(btn);
     });
+  });
+
+  // Posiziona lo squircle sulla scheda iniziale senza animazione, e lo
+  // riallinea se la finestra cambia dimensione/orientamento.
+  moveIndicatorTo(document.querySelector(".tab-btn.active"), false);
+  window.addEventListener("resize", () => {
+    moveIndicatorTo(document.querySelector(".tab-btn.active"), false);
   });
 
   // ===========================================================================
@@ -833,6 +950,11 @@
   }
 
   function openColorPopover(anchorEl, onChange) {
+    // Se era attiva una pipetta (l'utente aveva premuto "Preleva colore" e poi,
+    // invece di toccare la foto, ha riaperto il selettore per scegliere il
+    // colore con gli slider), annullarla: altrimenti resta "armata" e un
+    // successivo tocco sulla foto sovrascrive il colore appena scelto a mano.
+    if (eyedrop) stopEyedrop();
     closeColorPopover();
     const initialHex = getColorValue(anchorEl);
     const hsl = hexToHsl(initialHex);

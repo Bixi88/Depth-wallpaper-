@@ -313,8 +313,29 @@ html, body {
   flex-shrink: 0;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+  position: relative;
 }
 #tabs::-webkit-scrollbar { display: none; }
+
+/* Squircle giallo che scorre da una scheda all'altra. E' un unico elemento
+   condiviso (non uno sfondo per-bottone): per passare da una scheda all'altra
+   attraversa sempre fisicamente le icone intermedie, con durata SEMPRE uguale
+   a quella dello slide dei pannelli sottostanti (vedi TRANSITION_MS in
+   app.js). A parita' di durata, la velocita' percepita cambia da sola in base
+   alla distanza: spostamento breve (Media -> Orologio) risulta "normale",
+   spostamento lungo (Media -> Soggetto) risulta piu' "veloce". */
+.tab-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 39px;
+  height: 39px;
+  border-radius: 34%;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: 0;
+  transform: translate(0, 0);
+}
 
 .tab-btn {
   flex: 1 0 auto;
@@ -332,10 +353,11 @@ html, body {
   cursor: pointer;
   border-radius: 14px 14px 0 0;
   position: relative;
+  z-index: 1;
 }
-/* Icone monocromatiche: bianche quando la scheda e' a riposo, nere dentro uno
-   squircle giallo quando e' selezionata. Il riquadro e' 39px, cioe' il 50% in
-   piu' del vecchio cerchio da 26px. */
+/* Icone monocromatiche: bianche quando la scheda e' a riposo, nere quando e'
+   selezionata (in quel momento ci si trova sopra lo squircle giallo che
+   scorre, vedi .tab-indicator sopra). */
 .tab-btn .tab-ico {
   width: 39px;
   height: 39px;
@@ -344,7 +366,7 @@ html, body {
   justify-content: center;
   color: #ffffff;
   border-radius: 34%;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: color 0.15s ease;
 }
 .tab-btn .tab-ico svg {
   width: 21px;
@@ -360,7 +382,6 @@ html, body {
   color: var(--text-0);
 }
 .tab-btn.active .tab-ico {
-  background: var(--accent);
   color: #000000;
 }
 
@@ -457,8 +478,17 @@ html, body {
   -webkit-overflow-scrolling: touch;
 }
 
+/* #panelSlider e' il contenitore che scorre in orizzontale: a riposo mostra
+   solo il pannello .active in flusso normale, cosi' #tab-panels puo'
+   continuare a scrollare in verticale come prima. Durante il cambio scheda
+   (vedi switchTab in app.js) i due pannelli coinvolti vengono messi
+   temporaneamente in position:absolute e fatti scorrere, sempre andando
+   DIRETTAMENTE dal pannello di partenza a quello di arrivo, senza attraversare
+   i pannelli intermedi. */
+#panelSlider { position: relative; }
+
 .panel { display: none; }
-.panel.active { display: block; animation: fadeIn 0.15s ease; }
+.panel.active { display: block; }
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }

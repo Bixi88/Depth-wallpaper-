@@ -40,6 +40,7 @@
     <section id="controls">
 
       <nav id="tabs">
+        <div class="tab-indicator" id="tabIndicator"></div>
         <button class="tab-btn active" data-tab="media">
           <span class="tab-ico">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -84,6 +85,7 @@
       </nav>
 
       <div id="tab-panels">
+        <div id="panelSlider">
 
         <!-- ---- MEDIA ---- -->
         <div class="panel active" id="panel-media">
@@ -124,6 +126,17 @@
               <input type="checkbox" id="clockEnabledCheck" checked />
               <span>Mostra orologio</span>
             </label>
+          </div>
+
+          <div class="field-group">
+            <label for="clockFontSelect">Font</label>
+            <select id="clockFontSelect"></select>
+          </div>
+          <div class="field-group">
+            <label class="checkbox-row"><input type="checkbox" id="clockBoldCheck" checked /><span>Grassetto</span></label>
+          </div>
+          <div class="field-group">
+            <label class="checkbox-row"><input type="checkbox" id="clockItalicCheck" /><span>Corsivo</span></label>
           </div>
 
           <div class="field-group" id="clockFormatGroup">
@@ -169,16 +182,6 @@
           </div>
 
           <div class="field-group section-title">Carattere</div>
-          <div class="field-group">
-            <label for="clockFontSelect">Font</label>
-            <select id="clockFontSelect"></select>
-          </div>
-          <div class="field-group">
-            <label class="checkbox-row"><input type="checkbox" id="clockBoldCheck" checked /><span>Grassetto</span></label>
-          </div>
-          <div class="field-group">
-            <label class="checkbox-row"><input type="checkbox" id="clockItalicCheck" /><span>Corsivo</span></label>
-          </div>
           <div class="field-group">
             <label>Dimensione <span class="value-badge" id="clockSizeValue">150</span></label>
             <input type="range" id="clockSizeRange" min="20" max="700" value="150" data-center="150" />
@@ -256,7 +259,17 @@
         <div class="panel" id="panel-date">
           <div class="field-group">
             <label class="checkbox-row"><input type="checkbox" id="dateEnabledCheck" checked /><span>Mostra data</span></label>
-            <p class="hint-text">Livello indipendente dall'orologio: font, dimensione, contorno e posizione non si influenzano a vicenda.</p>
+          </div>
+
+          <div class="field-group">
+            <label for="dateFontSelect">Font</label>
+            <select id="dateFontSelect"></select>
+          </div>
+          <div class="field-group">
+            <label class="checkbox-row"><input type="checkbox" id="dateBoldCheck" /><span>Grassetto</span></label>
+          </div>
+          <div class="field-group">
+            <label class="checkbox-row"><input type="checkbox" id="dateItalicCheck" /><span>Corsivo</span></label>
           </div>
 
           <div class="field-group">
@@ -299,16 +312,6 @@
           </div>
 
           <div class="field-group section-title">Carattere</div>
-          <div class="field-group">
-            <label for="dateFontSelect">Font</label>
-            <select id="dateFontSelect"></select>
-          </div>
-          <div class="field-group">
-            <label class="checkbox-row"><input type="checkbox" id="dateBoldCheck" /><span>Grassetto</span></label>
-          </div>
-          <div class="field-group">
-            <label class="checkbox-row"><input type="checkbox" id="dateItalicCheck" /><span>Corsivo</span></label>
-          </div>
           <div class="field-group">
             <label>Dimensione <span class="value-badge" id="dateSizeValue">38</span></label>
             <input type="range" id="dateSizeRange" min="12" max="220" value="38" data-center="38" />
@@ -442,6 +445,7 @@
           </div>
         </div>
 
+        </div>
       </div>
     </section>
   </div>
