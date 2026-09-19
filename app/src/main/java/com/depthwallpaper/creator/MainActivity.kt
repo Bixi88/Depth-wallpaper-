@@ -480,14 +480,14 @@ class MainActivity : ComponentActivity() {
      * file e non da un JPEG gia' ridotto e ricompresso.
      * Da chiamare fuori dal thread UI.
      */
-    private fun loadUpscaleSource(uri: Uri): UpscaleSource? {
+    private fun loadUpscaleSource(uri: Uri, model: Upscaler.UpscaleModel): UpscaleSource? {
         val (origW, origH) = probeImageSize(uri) ?: return null
 
         val origLong = maxOf(origW, origH)
         val target = Upscaler.targetLongSideFor(origLong)
         // Mai oltre l'originale: ingrandire prima dell'inferenza darebbe alla rete
         // pixel gia' interpolati, cioe' dettaglio finto al posto di dettaglio vero.
-        val input = Upscaler.plannedInputLongSide(applicationContext, target).coerceAtMost(origLong)
+        val input = Upscaler.plannedInputLongSide(applicationContext, target, model).coerceAtMost(origLong)
 
         val bitmap = decodeAtLongSide(uri, input) ?: return null
         return UpscaleSource(bitmap, target)
@@ -707,10 +707,11 @@ class MainActivity : ComponentActivity() {
         }
 
         /**
-         * "Upscaling AI": esegue Real-ESRGAN-General-x4v3 (TFLite, on-device) sulla foto
-         * intera. NON opera mai sul solo soggetto ritagliato: quella resta una feature
+         * "Upscaling AI": esegue Real-ESRGAN (TFLite, on-device) sulla foto intera.
+         * NON opera mai sul solo soggetto ritagliato: quella resta una feature
          * separata dell'app, indipendente da questa. L'inferenza a tile puo' richiedere
-         * qualche secondo: gira sempre fuori dal thread UI.
+         * qualche secondo (modello veloce) o parecchio di piu' (modello di qualita'):
+         * gira sempre fuori dal thread UI.
          *
          * Il data URL ricevuto dal JS e' solo un RIPIEGO. La sorgente buona e' il file
          * originale in galleria (bgSourceUri), riletto qui da zero: il data URL e' la
@@ -719,9 +720,13 @@ class MainActivity : ComponentActivity() {
          *
          * L'operazione e' ripetibile: premendo di nuovo "Upscaling AI" si riparte sempre
          * dall'originale, quindi non si impilano due passaggi 4x uno sull'altro.
+         *
+         * @param modelId "fast" (default, Real-ESRGAN x4v3) oppure "quality" (Real-ESRGAN
+         *        x4plus, se il relativo asset e' incluso nella build).
          */
         @JavascriptInterface
-        fun upscaleImage(imageDataUrl: String) {
+        fun upscaleImage(imageDataUrl: String, modelId: String?) {
+            val model = Upscaler.UpscaleModel.fromId(modelId)
             Thread {
                 try {
                     // 1) Percorso buono: si riparte dal file originale in galleria.
@@ -729,7 +734,7 @@ class MainActivity : ComponentActivity() {
                     val uri = bgSourceUri
                     if (uri != null) {
                         source = try {
-                            loadUpscaleSource(uri)
+                            loadUpscaleSource(uri, model)
                         } catch (e: Throwable) {
                             android.util.Log.w("DepthWallpaper", "Originale non rileggibile, uso la copia in anteprima", e)
                             null
@@ -757,7 +762,7 @@ class MainActivity : ComponentActivity() {
 
                     notifyUpscaleProgress(0)
                     var lastSentPercent = -1
-                    val result = Upscaler.upscale(applicationContext, bitmap, prepared.targetLongSide) { fraction ->
+                    val result = Upscaler.upscale(applicationContext, bitmap, prepared.targetLongSide, model) { fraction ->
                         val percent = (fraction * 100f).toInt().coerceIn(0, 100)
                         // Un evaluateJavascript per ogni variazione di punto percentuale
                         // (non per ogni singola tile): sono al massimo ~100 chiamate a
@@ -784,6 +789,20 @@ class MainActivity : ComponentActivity() {
                     notifyUpscaleResult(null, "Upscaling AI non riuscito: ${e.message ?: e.javaClass.simpleName}")
                 }
             }.start()
+        }
+
+        /**
+         * Dice alla UI se il modello di qualita' superiore (Real-ESRGAN x4plus) e'
+         * effettivamente incluso in questa build, cosi' la UI puo' mostrare/nascondere
+         * l'opzione invece di far scoprire l'errore solo dopo aver premuto "Upscaling AI".
+         */
+        @JavascriptInterface
+        fun isQualityUpscaleModelAvailable(): Boolean {
+            return try {
+                Upscaler.isModelAvailable(applicationContext, Upscaler.UpscaleModel.QUALITY)
+            } catch (e: Throwable) {
+                false
+            }
         }
 
         /**

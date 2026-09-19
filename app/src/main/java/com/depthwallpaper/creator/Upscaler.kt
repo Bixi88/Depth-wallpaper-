@@ -15,10 +15,14 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * "Upscaling AI" della foto intera: Real-ESRGAN-General-x4v3 (TFLite, BSD-3-Clause,
- * https://huggingface.co/qualcomm/Real-ESRGAN-General-x4v3), scelto perché pensato
- * apposta per foto reali imperfette (blur/rumore/compressione), non per disegni.
- * Gira 100% on-device: nessun upload, nessun permesso Internet richiesto.
+ * "Upscaling AI" della foto intera. Due modelli selezionabili (vedi UpscaleModel sotto):
+ * di default quello VELOCE, Real-ESRGAN-General-x4v3 (TFLite, BSD-3-Clause,
+ * https://huggingface.co/qualcomm/Real-ESRGAN-General-x4v3), pensato apposta per foto
+ * reali imperfette (blur/rumore/compressione), non per disegni; in alternativa, quando
+ * l'asset e' presente, quello di QUALITA' superiore Real-ESRGAN-x4plus (stessa licenza,
+ * https://huggingface.co/qualcomm/Real-ESRGAN-x4plus), piu' pesante in calcoli ma con
+ * dettaglio ricostruito piu' pulito. Gira sempre 100% on-device: nessun upload, nessun
+ * permesso Internet richiesto.
  *
  * Il modello accetta SOLO tile fisse (di norma 128x128 -> 512x512, fattore 4x fisso):
  * qui la foto intera viene spezzata in tile con un piccolo margine di contesto
@@ -46,7 +50,22 @@ import kotlin.math.roundToInt
  */
 object Upscaler {
 
-    private const val MODEL_PATH = "models/realesrgan-x4v3.tflite"
+    /**
+     * Modelli disponibili. QUALITY e' opzionale: se il file .tflite non e' incluso
+     * nell'app (assets/models/), ensureInterpreter lancia UnavailableException con un
+     * messaggio che spiega cosa manca, invece di far crashare l'inferenza.
+     */
+    enum class UpscaleModel(val assetPath: String, val label: String) {
+        FAST("models/realesrgan-x4v3.tflite", "Veloce"),
+        QUALITY("models/realesrgan-x4plus_w8a8.tflite", "Qualit\u00e0 (pi\u00f9 lento)");
+
+        companion object {
+            fun fromId(id: String?): UpscaleModel = when (id) {
+                "quality" -> QUALITY
+                else -> FAST
+            }
+        }
+    }
 
     /** Contesto extra (in pixel, spazio sorgente) attorno al "nucleo" di ogni tile,
      *  scartato dopo l'inferenza per evitare cuciture visibili tra una tile e l'altra. */
@@ -72,22 +91,36 @@ object Upscaler {
      */
     private const val SUPERSAMPLE = 1.5f
 
-    private var interpreter: Interpreter? = null
-    private var nnApiDelegate: NnApiDelegate? = null
-    private var tileIn = 128
-    private var tileOut = 512
-    private var scale = 4
+    /** Un modello caricato e pronto: interprete TFLite + le dimensioni di tile che
+     *  quel particolare file dichiara nei suoi tensori di input/output. Tenerle qui
+     *  (invece che in variabili condivise dell'object) evita che due modelli diversi
+     *  usati a ridosso l'uno dell'altro si "pestino i piedi" a runtime. */
+    private class LoadedModel(
+        val interpreter: Interpreter,
+        val delegate: NnApiDelegate?,
+        val tileIn: Int,
+        val tileOut: Int,
+        val scale: Int
+    )
+
+    private val loadedModels = HashMap<UpscaleModel, LoadedModel>()
 
     class UnavailableException(message: String) : Exception(message)
 
     @Synchronized
-    private fun ensureInterpreter(context: Context): Interpreter {
-        interpreter?.let { return it }
+    private fun ensureInterpreter(context: Context, model: UpscaleModel): LoadedModel {
+        loadedModels[model]?.let { return it }
 
         val modelBuffer = try {
-            loadModelFile(context)
+            loadModelFile(context, model.assetPath)
         } catch (e: Exception) {
-            throw UnavailableException("Modello di upscaling non trovato nell'app")
+            throw UnavailableException(
+                if (model == UpscaleModel.QUALITY)
+                    "Modello \"${model.label}\" non incluso in questa build: aggiungi il file " +
+                        "assets/${model.assetPath} e ricompila l'app per abilitarlo."
+                else
+                    "Modello di upscaling non trovato nell'app"
+            )
         }
 
         val options = Interpreter.Options().apply { setNumThreads(max(2, Runtime.getRuntime().availableProcessors())) }
@@ -95,23 +128,27 @@ object Upscaler {
         // Su NPU/DSP e' molto piu' veloce: si tenta il delegate NNAPI (Android 8.1+) e,
         // se il dispositivo/driver non lo supporta bene, si ricade in automatico sulla CPU.
         var built: Interpreter? = null
+        var delegate: NnApiDelegate? = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             try {
-                val delegate = NnApiDelegate()
+                val d = NnApiDelegate()
                 val nnOptions = Interpreter.Options().apply {
                     setNumThreads(max(2, Runtime.getRuntime().availableProcessors()))
-                    addDelegate(delegate)
+                    addDelegate(d)
                 }
                 built = Interpreter(modelBuffer, nnOptions)
-                nnApiDelegate = delegate
+                delegate = d
             } catch (e: Throwable) {
-                nnApiDelegate?.close()
-                nnApiDelegate = null
+                delegate?.close()
+                delegate = null
                 built = null
             }
         }
         val interp = built ?: Interpreter(modelBuffer, options)
 
+        var tileIn = 128
+        var tileOut = 512
+        var scale = 4
         val inShape = interp.getInputTensor(0).shape() // [1, H, W, 3]
         val outShape = interp.getOutputTensor(0).shape() // [1, H*scale, W*scale, 3]
         if (inShape.size == 4 && outShape.size == 4 && inShape[1] > 0 && outShape[1] > 0) {
@@ -120,18 +157,30 @@ object Upscaler {
             scale = max(1, tileOut / tileIn)
         }
 
-        interpreter = interp
-        return interp
+        val loaded = LoadedModel(interp, delegate, tileIn, tileOut, scale)
+        loadedModels[model] = loaded
+        return loaded
     }
 
-    private fun loadModelFile(context: Context): MappedByteBuffer {
-        val afd = context.assets.openFd(MODEL_PATH)
+    private fun loadModelFile(context: Context, assetPath: String): MappedByteBuffer {
+        val afd = context.assets.openFd(assetPath)
         afd.use { fd ->
             val inputStream = fd.createInputStream()
             inputStream.use { stream ->
                 val channel = stream.channel
                 return channel.map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
             }
+        }
+    }
+
+    /** Vero se l'asset del modello e' effettivamente incluso in questa build (utile per
+     *  mostrare/nascondere l'opzione "Qualit\u00e0" nella UI senza dover tentare l'inferenza). */
+    fun isModelAvailable(context: Context, model: UpscaleModel): Boolean {
+        if (loadedModels.containsKey(model)) return true
+        return try {
+            context.assets.openFd(model.assetPath).use { true }
+        } catch (e: Exception) {
+            false
         }
     }
 
@@ -150,10 +199,9 @@ object Upscaler {
      * solo lavorare la rete su pixel gia' interpolati.
      * Va invocata fuori dal thread UI (la prima volta inizializza l'interprete TFLite).
      */
-    fun plannedInputLongSide(context: Context, targetLongSide: Int): Int {
+    fun plannedInputLongSide(context: Context, targetLongSide: Int, model: UpscaleModel = UpscaleModel.FAST): Int {
         val s = try {
-            ensureInterpreter(context)
-            scale
+            ensureInterpreter(context, model).scale
         } catch (e: Throwable) {
             4
         }
@@ -166,20 +214,26 @@ object Upscaler {
     /**
      * Esegue l'upscaling AI sull'intera foto e restituisce il bitmap risultante, gia'
      * riportato a targetLongSide. Va chiamata FUORI dal thread UI: l'inferenza a tile su
-     * una foto intera richiede da qualche secondo (NPU) a decine di secondi (solo CPU)
-     * a seconda del dispositivo.
+     * una foto intera richiede da qualche secondo (NPU, modello veloce) a decine di
+     * secondi (CPU, o modello di qualita' superiore) a seconda del dispositivo.
      *
      * @param targetLongSide lato lungo desiderato del risultato; se <= 0 si ricade sul
      *        vecchio comportamento (dedotto dalla sorgente ricevuta).
+     * @param model quale rete usare (vedi UpscaleModel): FAST di default.
      * @param onProgress richiamato dopo ogni tile con l'avanzamento REALE (0f..1f).
      */
     fun upscale(
         context: Context,
         src: Bitmap,
         targetLongSide: Int = 0,
+        model: UpscaleModel = UpscaleModel.FAST,
         onProgress: ((Float) -> Unit)? = null
     ): Bitmap {
-        val interp = ensureInterpreter(context)
+        val loaded = ensureInterpreter(context, model)
+        val interp = loaded.interpreter
+        val tileIn = loaded.tileIn
+        val tileOut = loaded.tileOut
+        val scale = loaded.scale
 
         val srcW = src.width
         val srcH = src.height
@@ -198,6 +252,7 @@ object Upscaler {
 
         val outW = srcW * scale
         val outH = srcH * scale
+
 
         // --- dimensioni finali -------------------------------------------------
         val requested = if (targetLongSide > 0) targetLongSide else targetLongSideFor(max(srcW, srcH))

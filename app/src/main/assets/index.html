@@ -100,6 +100,14 @@
 
           <div class="field-group">
             <button class="upload-btn ghost" id="btnUpscale">Upscaling AI</button>
+            <div class="field-group" id="upscaleModelGroup" style="margin-top:10px;">
+              <label for="upscaleModelSelect">Modello</label>
+              <select id="upscaleModelSelect">
+                <option value="fast" selected>Veloce</option>
+                <option value="quality">Qualit&agrave; superiore (pi&ugrave; lento)</option>
+              </select>
+              <p class="hint-text" id="upscaleModelHint">Il modello "Qualit&agrave;" ricostruisce pi&ugrave; dettaglio ma impiega parecchio di pi&ugrave;: usalo se hai tempo di aspettare, altrimenti resta su "Veloce".</p>
+            </div>
             <p class="hint-text">Migliora la nitidezza della foto intera con un modello AI on-device (Real-ESRGAN). Puoi applicarlo piu' volte di seguito per un effetto piu' marcato.</p>
             <button class="link-btn hidden" id="btnSaveUpscaled">Salva foto upscalata (JPG)</button>
           </div>

@@ -1205,7 +1205,24 @@
   const upscaleProgressPct = document.getElementById("upscaleProgressPct");
   const btnUpscale = document.getElementById("btnUpscale");
   const btnSaveUpscaled = document.getElementById("btnSaveUpscaled");
+  const upscaleModelSelect = document.getElementById("upscaleModelSelect");
+  const upscaleModelGroup = document.getElementById("upscaleModelGroup");
   let upscaleBusy = false;
+
+  // L'opzione "Qualita' superiore" (Real-ESRGAN x4plus) esiste solo se il file del
+  // modello e' stato incluso nella build nativa: se manca, la si nasconde invece di
+  // far scoprire l'errore solo dopo aver premuto "Upscaling AI".
+  if (isNative && Android.isQualityUpscaleModelAvailable) {
+    try {
+      if (!Android.isQualityUpscaleModelAvailable()) {
+        const qualityOpt = upscaleModelSelect.querySelector('option[value="quality"]');
+        if (qualityOpt) qualityOpt.remove();
+        upscaleModelGroup.classList.add("hidden");
+      }
+    } catch (e) { /* in dubbio, si lascia visibile */ }
+  } else if (!isNative) {
+    upscaleModelGroup.classList.add("hidden");
+  }
 
   function showUpscalePrompt() {
     if (!isNative) return; // in anteprima browser l'upscaling non e' disponibile
@@ -1246,8 +1263,9 @@
     }
     if (upscaleBusy) return;
     setUpscaleBusy(true);
+    const modelId = upscaleModelSelect ? upscaleModelSelect.value : "fast";
     try {
-      Android.upscaleImage(state.bg.dataUrl);
+      Android.upscaleImage(state.bg.dataUrl, modelId);
     } catch (e) {
       setUpscaleBusy(false);
       showToast("Errore: " + e);
