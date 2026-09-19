@@ -798,26 +798,37 @@ input[type="text"], select {
 /* ---------------- TOAST ---------------- */
 .toast {
   position: fixed;
-  left: 50%;
-  bottom: 24px;
-  transform: translate(-50%, 20px);
+  /* Centrato con left/right + margin auto (e non con left:50% + translateX(-50%)):
+     cosi' la larghezza massima e' quella dello schermo meno i margini, e i messaggi
+     lunghi vanno a capo invece di uscire dai bordi. */
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  box-sizing: border-box;
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  transform: translateY(20px);
   background: var(--bg-3);
   color: var(--text-0);
   padding: 10px 18px;
-  border-radius: 999px;
+  border-radius: 18px;
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
   border: 1px solid rgba(255, 197, 49, 0.35);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
   opacity: 0;
   pointer-events: none;
   transition: all 0.25s ease;
   z-index: 999;
-  white-space: nowrap;
 }
 .toast.show {
   opacity: 1;
-  transform: translate(-50%, 0);
+  transform: translateY(0);
 }
 
 /* ---------------- RITAGLIO SOGGETTO (AI + pennello) ---------------- */
@@ -1006,43 +1017,6 @@ input[type="text"], select {
   padding: 4px;
 }
 .link-btn.hidden { display: none; }
-
-/* Tab/bottone "Soggetto" bloccati finche' non si decide sull'Upscaling AI. */
-.tab-btn.tab-locked { opacity: 0.4; }
-.upload-btn.btn-locked { opacity: 0.5; }
-
-.prompt-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 700;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-}
-.prompt-modal.hidden { display: none; }
-.prompt-card {
-  width: 100%;
-  max-width: 340px;
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 20px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-}
-.prompt-title {
-  font-size: 15px;
-  font-weight: 700;
-  text-align: center;
-  margin: 0 0 8px;
-}
-.prompt-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  margin-top: 16px;
-}
 
 /* Overlay di elaborazione a schermo intero (fuori dall'editor di ritaglio, dove
    .cutout-loading e' invece relativo al wrapper del canvas). */

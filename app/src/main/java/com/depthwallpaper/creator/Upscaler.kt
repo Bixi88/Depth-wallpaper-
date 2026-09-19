@@ -138,16 +138,25 @@ object Upscaler {
         var built: Interpreter? = null
         var delegate: NnApiDelegate? = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            var d: NnApiDelegate? = null
+            var candidate: Interpreter? = null
             try {
-                val d = NnApiDelegate()
+                val nd = NnApiDelegate()
+                d = nd
                 val nnOptions = Interpreter.Options().apply {
                     setNumThreads(max(2, Runtime.getRuntime().availableProcessors()))
-                    addDelegate(d)
+                    addDelegate(nd)
                 }
-                built = Interpreter(modelBuffer, nnOptions)
+                candidate = Interpreter(modelBuffer, nnOptions)
+                // Prova a vuoto: con NNAPI molti errori (driver, operatori quantizzati non
+                // supportati) escono solo alla prima inferenza, non alla creazione. Meglio
+                // scoprirlo qui e ricadere sulla CPU che fallire a meta' upscale.
+                warmUp(candidate)
+                built = candidate
                 delegate = d
             } catch (e: Throwable) {
-                delegate?.close()
+                try { candidate?.close() } catch (_: Throwable) {}
+                try { d?.close() } catch (_: Throwable) {}
                 delegate = null
                 built = null
             }
@@ -183,6 +192,13 @@ object Upscaler {
         val loaded = LoadedModel(interp, delegate, tileIn, tileOut, scale, luts.first, luts.second)
         loadedModels[model] = loaded
         return loaded
+    }
+
+    /** Una inferenza su input nullo, con buffer dimensionati dai tensori stessi. */
+    private fun warmUp(interp: Interpreter) {
+        val inBuf = ByteBuffer.allocateDirect(interp.getInputTensor(0).numBytes()).order(ByteOrder.nativeOrder())
+        val outBuf = ByteBuffer.allocateDirect(interp.getOutputTensor(0).numBytes()).order(ByteOrder.nativeOrder())
+        interp.run(inBuf, outBuf)
     }
 
     private fun isQuantized(t: Tensor): Boolean = when (t.dataType()) {

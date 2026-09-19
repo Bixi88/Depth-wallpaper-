@@ -545,26 +545,19 @@
   const toastEl = document.getElementById("toast");
   let toastTimer = null;
   function showToast(msg) {
+    msg = String(msg);
     toastEl.textContent = msg;
     toastEl.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove("show"), 2400);
+    // I messaggi lunghi (es. errori) restano visibili piu' a lungo: 2,4 s + 40 ms per
+    // carattere oltre i 40, fino a un massimo di 9 s.
+    const ms = Math.min(9000, 2400 + Math.max(0, msg.length - 40) * 40);
+    toastTimer = setTimeout(() => toastEl.classList.remove("show"), ms);
   }
 
   // ===========================================================================
   // TAB
   // ===========================================================================
-  // Finche' l'utente non ha deciso se applicare l'Upscaling AI sulla foto appena
-  // caricata, il tab "Soggetto" resta bloccato: cosi' e' strutturalmente impossibile
-  // ritagliare il soggetto per sbaglio dalla versione a bassa risoluzione.
-  let subjectLocked = false;
-  function updateSubjectLockUi() {
-    const fgTab = document.querySelector('.tab-btn[data-tab="fg"]');
-    const btnCutout = document.getElementById("btnCutout");
-    if (fgTab) fgTab.classList.toggle("tab-locked", subjectLocked);
-    if (btnCutout) btnCutout.classList.toggle("btn-locked", subjectLocked);
-  }
-
   // ---------------------------------------------------------------------------
   // Ordine reale delle schede: usato per decidere la direzione dello slide
   // (avanti = da destra verso sinistra, indietro = da sinistra verso destra) e
@@ -681,10 +674,6 @@
 
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (subjectLocked && btn.dataset.tab === "fg") {
-        showToast("Decidi prima se applicare l'Upscaling AI alla foto");
-        return;
-      }
       switchTab(btn);
     });
   });
@@ -1115,10 +1104,6 @@
   document.getElementById("btnCutoutOther").addEventListener("click", () => requestImage("fg-source"));
 
   document.getElementById("btnCutout").addEventListener("click", () => {
-    if (subjectLocked) {
-      showToast("Decidi prima se applicare l'Upscaling AI alla foto");
-      return;
-    }
     // Se c'e' gia' una sessione di ritaglio attiva (mascherina in corso o gia'
     // applicata) si riapre esattamente li' invece di rifare l'analisi AI da zero.
     if (cutoutSourceCanvas && cutoutMaskCanvas) reopenCutoutEditor();
@@ -1191,15 +1176,11 @@
     // Foto nuova come sfondo: il soggetto della foto precedente non ha piu' senso.
     setBackground(dataUrl, true, true);
     document.getElementById("btnSaveUpscaled").classList.add("hidden");
-    subjectLocked = true;
-    updateSubjectLockUi();
-    showUpscalePrompt();
   };
 
   // ===========================================================================
   // UPSCALING AI (Real-ESRGAN on-device, solo sulla foto intera)
   // ===========================================================================
-  const upscalePromptModal = document.getElementById("upscalePromptModal");
   const upscaleLoading = document.getElementById("upscaleLoading");
   const upscaleProgressFill = document.getElementById("upscaleProgressFill");
   const upscaleProgressPct = document.getElementById("upscaleProgressPct");
@@ -1222,14 +1203,6 @@
     } catch (e) { /* in dubbio, si lascia visibile */ }
   } else if (!isNative) {
     upscaleModelGroup.classList.add("hidden");
-  }
-
-  function showUpscalePrompt() {
-    if (!isNative) return; // in anteprima browser l'upscaling non e' disponibile
-    upscalePromptModal.classList.remove("hidden");
-  }
-  function hideUpscalePrompt() {
-    upscalePromptModal.classList.add("hidden");
   }
 
   function setUpscaleProgress(percent) {
@@ -1272,17 +1245,6 @@
     }
   }
 
-  document.getElementById("upscalePromptYesBtn").addEventListener("click", () => {
-    hideUpscalePrompt();
-    requestUpscale();
-  });
-  document.getElementById("upscalePromptSkipBtn").addEventListener("click", () => {
-    hideUpscalePrompt();
-    subjectLocked = false;
-    updateSubjectLockUi();
-    showToast("Puoi avviare l'Upscaling AI in qualsiasi momento dal tab Media");
-  });
-
   btnUpscale.addEventListener("click", requestUpscale);
 
   btnSaveUpscaled.addEventListener("click", () => {
@@ -1310,11 +1272,15 @@
       showToast(errorMessage || "Upscaling AI non riuscito");
       return;
     }
-    setBackground(dataUrl, true, false);
+    // Il soggetto gia' ritagliato e' stato ricavato dalla versione a bassa risoluzione:
+    // dopo l'upscale non combacerebbe piu' con lo sfondo, quindi lo si elimina (insieme
+    // alla sessione di ritaglio) e va rifatto dalla foto upscalata.
+    const hadSubject = !!state.fg.img;
+    setBackground(dataUrl, true, true);
     btnSaveUpscaled.classList.remove("hidden");
-    subjectLocked = false;
-    updateSubjectLockUi();
-    showToast("Upscaling AI completato \u2713");
+    showToast(hadSubject
+      ? "Upscaling AI completato \u2713 Soggetto rimosso: rifallo dal tab Soggetto"
+      : "Upscaling AI completato \u2713");
   };
 
   // ===========================================================================
