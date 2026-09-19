@@ -69,6 +69,15 @@ object Upscaler {
         }
     }
 
+    /**
+     * Se false (default) il modello gira SEMPRE sulla CPU (XNNPACK di TFLite). Su Samsung
+     * S25 / Snapdragon 8 Elite il delegate NNAPI non era piu' veloce della CPU e in un
+     * caso ha prodotto un'immagine corrotta (mosaico di tile sbagliate), mentre la logica
+     * di composizione a tile e' verificata corretta: il problema stava nell'output del
+     * modello sotto NNAPI. Rimetti true solo per esperimenti.
+     */
+    private const val USE_NNAPI = false
+
     /** Contesto extra (in pixel, spazio sorgente) attorno al "nucleo" di ogni tile,
      *  scartato dopo l'inferenza per evitare cuciture visibili tra una tile e l'altra. */
     private const val OVERLAP = 8
@@ -136,11 +145,11 @@ object Upscaler {
 
         val options = Interpreter.Options().apply { setNumThreads(max(2, Runtime.getRuntime().availableProcessors())) }
 
-        // Su NPU/DSP e' molto piu' veloce: si tenta il delegate NNAPI (Android 8.1+) e,
-        // se il dispositivo/driver non lo supporta bene, si ricade in automatico sulla CPU.
+        // NNAPI e' disattivato di default (vedi USE_NNAPI): si tenta solo se abilitato e,
+        // se il dispositivo/driver non lo supporta bene, si ricade sulla CPU.
         var built: Interpreter? = null
         var delegate: NnApiDelegate? = null
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+        if (USE_NNAPI && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             var d: NnApiDelegate? = null
             var candidate: Interpreter? = null
             try {
