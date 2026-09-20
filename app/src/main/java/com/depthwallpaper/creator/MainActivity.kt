@@ -11,7 +11,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.Canvas
 import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.net.Uri
@@ -69,6 +68,21 @@ class MainActivity : ComponentActivity() {
     private var pendingSaveFileName: String? = null
     private var pendingSaveMimeType: String = "image/png"
 
+    /** Aggiornato da JS (setCutoutEditorOpen) mentre l'editor di ritaglio e'
+     *  aperto/chiuso: serve a onBackPressed per sapere se lo swipe/tasto indietro
+     *  deve chiudere l'editor (tornando alla home) invece di far scattare il
+     *  doppio-indietro-per-uscire, che vale solo in home. @Volatile perche' viene
+     *  scritto dal thread della WebView (i metodi @JavascriptInterface non girano
+     *  sul thread UI) e letto dal thread UI in onBackPressed.
+     */
+    @Volatile
+    private var isCutoutEditorOpen = false
+
+    /** Stato del "premi di nuovo per uscire" in home: true nella finestra di
+     *  tempo subito dopo il primo swipe/tasto indietro, durante la quale un
+     *  secondo swipe chiude davvero l'app. */
+    private var backPressedOnce = false
+
     private val pickImageLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val uri = if (result.resultCode == Activity.RESULT_OK) result.data?.data else null
@@ -119,12 +133,33 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Nella finestra di ritaglio lo swipe/tasto indietro chiude sempre l'editor
+     * riportando alla home (mai l'app): lo delega a JS, che si comporta come il
+     * tasto "Annulla". In home, invece, il primo swipe indietro NON chiude l'app:
+     * mostra un avviso e serve un secondo swipe entro 2 secondi per uscire
+     * davvero, cosi' uno swipe accidentale (frequente con la gesture di sistema)
+     * non fa chiudere l'app di colpo.
+     */
     override fun onBackPressed() {
+        if (isCutoutEditorOpen) {
+            webView.evaluateJavascript(
+                "window.closeCutoutEditorFromBack && window.closeCutoutEditorFromBack();",
+                null
+            )
+            return
+        }
         if (webView.canGoBack()) {
             webView.goBack()
-        } else {
-            super.onBackPressed()
+            return
         }
+        if (backPressedOnce) {
+            super.onBackPressed()
+            return
+        }
+        backPressedOnce = true
+        Toast.makeText(this, "Premi di nuovo indietro per uscire", Toast.LENGTH_SHORT).show()
+        webView.postDelayed({ backPressedOnce = false }, 2000)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -516,20 +551,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Come notifySubjectCutout, ma per il risultato "soggetti multipli": ogni
-     *  elemento e' un PNG data URL a grandezza intera (soggetto posizionato nel
-     *  suo riquadro originale, resto trasparente), cosi' l'editor puo' mostrarli
-     *  come miniature e l'utente sceglie quale usare. */
-    private fun notifySubjectCutoutList(pngDataUrls: List<String>) {
-        runOnUiThread {
-            val arrArg = pngDataUrls.joinToString(prefix = "[", postfix = "]") { "'${it}'" }
-            webView.evaluateJavascript(
-                "window.onSubjectCutoutList && window.onSubjectCutoutList($arrArg);",
-                null
-            )
-        }
-    }
-
     private fun notifyImageSaved(success: Boolean) {
         runOnUiThread {
             webView.evaluateJavascript(
@@ -658,16 +679,16 @@ class MainActivity : ComponentActivity() {
         }
 
         /**
-         * Ritaglio automatico del/dei soggetto/i tramite ML Kit Subject Segmentation
+         * Ritaglio automatico del soggetto tramite ML Kit Subject Segmentation
          * (modello on-device scaricato via Google Play services, nessun upload verso
-         * internet). A differenza di prima non ci si affida piu' a un solo soggetto
-         * "fuso" scelto dal modello (che su forme articolate come rami/piante spesso
-         * lo ignora del tutto a favore del soggetto piu' saliente): con
-         * enableMultipleSubjects si ottiene la lista di TUTTI i soggetti riconosciuti,
-         * ciascuno con la propria maschera. Li restituiamo tutti a JS (come PNG a
-         * grandezza intera, soggetto nel suo riquadro originale) tramite
-         * window.onSubjectCutoutList, cosi' l'utente sceglie quale usare come base
-         * da rifinire col pennello.
+         * internet). Riceve la foto scelta come data URL, restituisce a JS il PNG
+         * del solo soggetto (sfondo reso trasparente) tramite window.onSubjectCutout.
+         * Nota: si e' provato anche enableMultipleSubjects (soggetti multipli) per
+         * lasciare scegliere all'utente tra piu' oggetti rilevati, ma sui casi reali
+         * (es. una pianta articolata sullo sfondo) il modello continuava a trovare
+         * solo il soggetto piu' "saliente" comunque: tornati quindi al singolo
+         * soggetto centrale, con la bacchetta magica lato JS per recuperare a mano
+         * eventuali altre zone che l'AI ha scartato.
          */
         @JavascriptInterface
         fun cutoutSubject(imageDataUrl: String) {
@@ -681,54 +702,40 @@ class MainActivity : ComponentActivity() {
                         return@runOnUiThread
                     }
 
-                    val subjectResultOptions = SubjectSegmenterOptions.SubjectResultOptions.Builder()
-                        .enableSubjectBitmap()
-                        .build()
                     val options = SubjectSegmenterOptions.Builder()
-                        .enableMultipleSubjects(subjectResultOptions)
+                        .enableForegroundBitmap()
                         .build()
                     val segmenter = SubjectSegmentation.getClient(options)
                     val input = InputImage.fromBitmap(bitmap, 0)
 
                     segmenter.process(input)
                         .addOnSuccessListener { result ->
-                            val subjects = result.subjects
-                            if (subjects.isEmpty()) {
-                                notifySubjectCutout(null, "Nessun soggetto riconosciuto: usa il pennello")
-                                return@addOnSuccessListener
-                            }
-                            // Ogni Subject.bitmap e' ritagliato al suo riquadro (startX/startY/
-                            // width/height): lo ricomponiamo su un canvas della dimensione
-                            // originale, cosi' resta allineato 1:1 con la foto sorgente in JS.
-                            val dataUrls = subjects.mapNotNull { subject ->
-                                val subjectBitmap = subject.bitmap ?: return@mapNotNull null
-                                val full = Bitmap.createBitmap(
-                                    bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888
-                                )
-                                Canvas(full).drawBitmap(
-                                    subjectBitmap,
-                                    subject.startX.toFloat(),
-                                    subject.startY.toFloat(),
-                                    null
-                                )
-                                val out = ByteArrayOutputStream()
-                                full.compress(Bitmap.CompressFormat.PNG, 100, out)
-                                "data:image/png;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
-                            }
-                            if (dataUrls.isEmpty()) {
-                                notifySubjectCutout(null, "Nessun soggetto riconosciuto: usa il pennello")
+                            val fg = result.foregroundBitmap
+                            if (fg == null) {
+                                notifySubjectCutout(null, "Nessun soggetto riconosciuto: usa la bacchetta magica")
                             } else {
-                                notifySubjectCutoutList(dataUrls)
+                                val out = ByteArrayOutputStream()
+                                fg.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                val b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                                notifySubjectCutout("data:image/png;base64,$b64", null)
                             }
                         }
                         .addOnFailureListener {
                             // Es. modello non ancora scaricato al primo avvio dopo l'installazione.
-                            notifySubjectCutout(null, "Ritaglio AI non disponibile ora: usa il pennello")
+                            notifySubjectCutout(null, "Ritaglio AI non disponibile ora: usa la bacchetta magica")
                         }
                 } catch (e: Exception) {
                     notifySubjectCutout(null, "Errore durante il ritaglio automatico")
                 }
             }
+        }
+
+        /** Aggiornato da JS ogni volta che l'editor di ritaglio si apre/chiude
+         *  (vedi il MutationObserver su #cutoutModal in app.js): usato da
+         *  onBackPressed per decidere il comportamento dello swipe/tasto indietro. */
+        @JavascriptInterface
+        fun setCutoutEditorOpen(open: Boolean) {
+            isCutoutEditorOpen = open
         }
 
         /** Chiamato dal JS con il PNG renderizzato (data URL) pronto per l'export. */

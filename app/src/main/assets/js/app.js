@@ -1323,12 +1323,27 @@
   const cutoutLoading = document.getElementById("cutoutLoading");
   const CUTOUT_MAX_SIDE = 1400;
 
+  // Segnala al lato Android quando l'editor di ritaglio e' aperto/chiuso: serve al
+  // tasto/gesto "indietro" di sistema per sapere se deve chiudere l'editor (tornando
+  // alla home) invece di far scattare il doppio-indietro-per-uscire dall'app.
+  if (isNative && typeof Android.setCutoutEditorOpen === "function") {
+    new MutationObserver(() => {
+      Android.setCutoutEditorOpen(!cutoutModal.classList.contains("hidden"));
+    }).observe(cutoutModal, { attributes: true, attributeFilter: ["class"] });
+  }
+
   let cutoutSourceCanvas = null;
   let cutoutMaskCanvas = null;
   let cutoutMaskedSubjectCanvas = null;
   let cutoutTool = "brush";
   let cutoutBrushSize = 30;
   let cutoutDrawing = false;
+  // Modalita' di interazione col canvas: "wand" (bacchetta magica, attiva di
+  // default: si cerchia con un dito la zona da recuperare) oppure "manual"
+  // (pennello/gomma classici, da attivare esplicitamente per le rifiniture fini
+  // che la bacchetta magica non riesce a isolare bene).
+  let cutoutMode = "wand";
+  let cutoutWandDrag = null; // {x, y, r} in coordinate canvas, solo mentre si trascina il cerchio
   // Contorno ritaglio (eroderlo/dilata la maschera di N px) e bordo bianco adesivo:
   // entrambi a 0 all'apertura dell'editor, come richiesto ("sempre inizialmente centrale").
   let cutoutMaskOffsetPx = 0;
@@ -1400,6 +1415,7 @@
       setSlider("cutoutOffsetRange", 0);
       setSlider("cutoutOutlineRange", 0);
       setSlider("cutoutSmoothRange", 0);
+      setCutoutMode("wand");
       resetCutoutView();
 
       cutoutModal.classList.remove("hidden");
@@ -1423,6 +1439,7 @@
     setSlider("cutoutOffsetRange", cutoutMaskOffsetPx);
     setSlider("cutoutOutlineRange", cutoutOutlineWidthPx);
     setSlider("cutoutSmoothRange", cutoutSmoothPx);
+    setCutoutMode("wand");
     resetCutoutView();
     cutoutModal.classList.remove("hidden");
     renderCutoutPreview();
@@ -1535,14 +1552,12 @@
     return c;
   }
 
-  const cutoutSubjectPicker = document.getElementById("cutoutSubjectPicker");
-
   function requestAiCutout() {
     if (!isNative || !cutoutSourceCanvas) {
       showToast("Il ritaglio AI richiede l'app Android: usa il pennello");
       return;
     }
-    cutoutSubjectPicker.classList.add("hidden");
+    setCutoutMode("wand");
     cutoutLoading.classList.remove("hidden");
     Android.cutoutSubject(cutoutSourceCanvas.toDataURL("image/jpeg", 0.92));
   }
@@ -1555,41 +1570,6 @@
     }
     applyCutoutMask(maskDataUrl);
   };
-
-  /** Risultato "soggetti multipli": invece di un solo ritaglio gia' scelto da
-   *  ML Kit, arriva la lista di tutti i soggetti riconosciuti (utile sulle foto
-   *  dove il soggetto che interessa non e' quello piu' "saliente", es. una
-   *  pianta articolata dietro a un'insegna). Si mostra una miniatura per
-   *  ciascuno e si preseleziona il primo; l'utente puo' cambiarlo con un tocco,
-   *  poi rifinire i bordi col pennello come sempre. */
-  window.onSubjectCutoutList = function (dataUrls) {
-    cutoutLoading.classList.add("hidden");
-    if (!dataUrls || !dataUrls.length) {
-      showToast("Nessun soggetto riconosciuto: usa il pennello");
-      return;
-    }
-    cutoutSubjectPicker.innerHTML = "";
-    dataUrls.forEach((url) => {
-      const thumb = document.createElement("button");
-      thumb.type = "button";
-      thumb.className = "cutout-subject-thumb";
-      const img = document.createElement("img");
-      img.src = url;
-      thumb.appendChild(img);
-      thumb.addEventListener("click", () => selectCutoutSubject(url, thumb));
-      cutoutSubjectPicker.appendChild(thumb);
-    });
-    cutoutSubjectPicker.classList.remove("hidden");
-    // Preseleziona il primo soggetto (in genere il piu' grande) cosi' l'utente
-    // vede subito un risultato, ed eventualmente ne sceglie un altro.
-    selectCutoutSubject(dataUrls[0], cutoutSubjectPicker.firstElementChild);
-  };
-
-  function selectCutoutSubject(dataUrl, thumbEl) {
-    Array.from(cutoutSubjectPicker.children).forEach((c) => c.classList.remove("selected"));
-    if (thumbEl) thumbEl.classList.add("selected");
-    applyCutoutMask(dataUrl);
-  }
 
   function applyCutoutMask(maskDataUrl) {
     const maskImg = new Image();
@@ -1621,6 +1601,24 @@
     }
 
     cutoutCtx.drawImage(buildMaskedSubject(effectiveMask), 0, 0);
+
+    // Cerchio-guida mentre si trascina la bacchetta magica: stessa canvas/stesso
+    // sistema di coordinate del contenuto, quindi resta perfettamente allineato
+    // anche con zoom/pan attivi (niente canvas separato da tenere sincronizzato).
+    if (cutoutWandDrag) {
+      cutoutCtx.save();
+      cutoutCtx.strokeStyle = "#5ee6c8";
+      cutoutCtx.lineWidth = Math.max(1, 2 / cutoutZoom);
+      cutoutCtx.setLineDash([8 / cutoutZoom, 6 / cutoutZoom]);
+      cutoutCtx.beginPath();
+      cutoutCtx.arc(cutoutWandDrag.x, cutoutWandDrag.y, Math.max(cutoutWandDrag.r, 3), 0, Math.PI * 2);
+      cutoutCtx.stroke();
+      cutoutCtx.fillStyle = "#5ee6c8";
+      cutoutCtx.beginPath();
+      cutoutCtx.arc(cutoutWandDrag.x, cutoutWandDrag.y, Math.max(3 / cutoutZoom, 1.5), 0, Math.PI * 2);
+      cutoutCtx.fill();
+      cutoutCtx.restore();
+    }
   }
 
   function cutoutCanvasPoint(evt) {
@@ -1640,6 +1638,78 @@
     mctx.arc(x, y, cutoutBrushSize / 2, 0, Math.PI * 2);
     mctx.fill();
     mctx.globalCompositeOperation = "source-over";
+    scheduleCutoutRender();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Bacchetta magica: si cerchia con un dito la zona da recuperare (es. una
+  // pianta che l'AI ha scartato). Il punto di partenza del gesto e' il seme, il
+  // raggio del cerchio tracciato imposta la tolleranza (cerchio piu' grande =
+  // selezione piu' permissiva sui colori vicini): al rilascio si esegue un
+  // flood-fill classico (4-connesso, iterativo con stack per evitare overflow
+  // su selezioni grandi) sui pixel della foto sorgente, e i pixel selezionati
+  // vengono aggiunti alla maschera (stesso effetto del pennello "ripristina",
+  // ma con un contorno calcolato invece che disegnato a mano).
+  // ---------------------------------------------------------------------------
+  const WAND_MIN_TOLERANCE = 14;
+  const WAND_MAX_TOLERANCE = 150;
+  const WAND_RADIUS_TO_TOLERANCE = 1.1;
+
+  function wandRadiusToTolerance(r) {
+    return Math.min(WAND_MAX_TOLERANCE, WAND_MIN_TOLERANCE + r * WAND_RADIUS_TO_TOLERANCE);
+  }
+
+  function runMagicWand(seed, radiusPx) {
+    if (!cutoutSourceCanvas || !cutoutMaskCanvas) return;
+    const w = cutoutSourceCanvas.width, h = cutoutSourceCanvas.height;
+    const sx = Math.round(seed.x), sy = Math.round(seed.y);
+    if (sx < 0 || sy < 0 || sx >= w || sy >= h) return;
+
+    const tolerance = wandRadiusToTolerance(radiusPx);
+    const tol2 = tolerance * tolerance;
+
+    const srcData = cutoutSourceCanvas.getContext("2d").getImageData(0, 0, w, h).data;
+    const seedIdx = (sy * w + sx) * 4;
+    const seedR = srcData[seedIdx], seedG = srcData[seedIdx + 1], seedB = srcData[seedIdx + 2];
+
+    const visited = new Uint8Array(w * h);
+    const stack = new Int32Array(w * h);
+    let sp = 0;
+    const startP = sy * w + sx;
+    stack[sp++] = startP;
+    visited[startP] = 1;
+
+    const selection = new Uint8Array(w * h);
+
+    while (sp > 0) {
+      const p = stack[--sp];
+      selection[p] = 1;
+      const px = p % w;
+      const py = (p - px) / w;
+      const left = px > 0 ? p - 1 : -1;
+      const right = px < w - 1 ? p + 1 : -1;
+      const up = py > 0 ? p - w : -1;
+      const down = py < h - 1 ? p + w : -1;
+      for (const np of [left, right, up, down]) {
+        if (np < 0 || visited[np]) continue;
+        visited[np] = 1;
+        const nIdx = np * 4;
+        const dr = srcData[nIdx] - seedR;
+        const dg = srcData[nIdx + 1] - seedG;
+        const db = srcData[nIdx + 2] - seedB;
+        if (dr * dr + dg * dg + db * db <= tol2) stack[sp++] = np;
+      }
+    }
+
+    const mctx = cutoutMaskCanvas.getContext("2d");
+    const maskImgData = mctx.getImageData(0, 0, w, h);
+    const md = maskImgData.data;
+    for (let i = 0; i < selection.length; i++) {
+      if (!selection[i]) continue;
+      const mi = i * 4;
+      md[mi] = 255; md[mi + 1] = 255; md[mi + 2] = 255; md[mi + 3] = 255;
+    }
+    mctx.putImageData(maskImgData, 0, 0);
     scheduleCutoutRender();
   }
 
@@ -1709,6 +1779,7 @@
     if (!cutoutSourceCanvas) return;
     if (evt.touches && evt.touches.length >= 2) {
       cutoutDrawing = false;
+      cutoutWandDrag = null;
       hideCutoutLoupe();
       const [t0, t1] = evt.touches;
       cutoutPinch = {
@@ -1721,10 +1792,15 @@
       evt.preventDefault();
       return;
     }
-    cutoutDrawing = true;
     const p = cutoutCanvasPoint(evt);
-    cutoutPaintAt(p.x, p.y);
-    showCutoutLoupe(evt, p);
+    if (cutoutMode === "manual") {
+      cutoutDrawing = true;
+      cutoutPaintAt(p.x, p.y);
+      showCutoutLoupe(evt, p);
+    } else {
+      cutoutWandDrag = { x: p.x, y: p.y, r: 0 };
+      scheduleCutoutRender();
+    }
     evt.preventDefault();
   }
 
@@ -1742,18 +1818,46 @@
       evt.preventDefault();
       return;
     }
-    if (!cutoutDrawing) return;
-    const p = cutoutCanvasPoint(evt);
-    cutoutPaintAt(p.x, p.y);
-    showCutoutLoupe(evt, p);
+    if (cutoutMode === "manual") {
+      if (!cutoutDrawing) return;
+      const p = cutoutCanvasPoint(evt);
+      cutoutPaintAt(p.x, p.y);
+      showCutoutLoupe(evt, p);
+    } else {
+      if (!cutoutWandDrag) return;
+      const p = cutoutCanvasPoint(evt);
+      cutoutWandDrag.r = Math.hypot(p.x - cutoutWandDrag.x, p.y - cutoutWandDrag.y);
+      scheduleCutoutRender();
+    }
     evt.preventDefault();
   }
 
   function cutoutPointerUp(evt) {
     if (evt && evt.touches && evt.touches.length >= 2) return; // resta un dito nel pizzico
     cutoutPinch = null;
-    cutoutDrawing = false;
-    hideCutoutLoupe();
+    if (cutoutMode === "manual") {
+      cutoutDrawing = false;
+      hideCutoutLoupe();
+    } else if (cutoutWandDrag) {
+      const { x, y, r } = cutoutWandDrag;
+      cutoutWandDrag = null;
+      scheduleCutoutRender();
+      const loadingText = cutoutLoading.querySelector("span");
+      const prevText = loadingText ? loadingText.textContent : null;
+      if (loadingText) loadingText.textContent = "Selezione in corso\u2026";
+      cutoutLoading.classList.remove("hidden");
+      // Doppio rAF: il primo fa consumare il ridisegno che toglie il cerchio-guida,
+      // il secondo garantisce che lo spinner sia gia' visibile a schermo prima che
+      // il flood-fill (sincrono, su foto grandi puo' richiedere qualche centinaio
+      // di millisecondi) blocchi il thread principale.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          runMagicWand({ x, y }, r);
+          cutoutLoading.classList.add("hidden");
+          if (loadingText && prevText != null) loadingText.textContent = prevText;
+        });
+      });
+    }
   }
 
   cutoutCanvas.addEventListener("mousedown", cutoutPointerDown);
@@ -1766,6 +1870,39 @@
 
   const cutoutZoomResetBtn = document.getElementById("cutoutZoomResetBtn");
   if (cutoutZoomResetBtn) cutoutZoomResetBtn.addEventListener("click", resetCutoutView);
+
+  // ---------------------------------------------------------------------------
+  // Toggle "bacchetta magica" (default) <-> "pennello manuale" (a richiesta,
+  // solo per rifinire i casi particolari che la bacchetta non isola bene).
+  // ---------------------------------------------------------------------------
+  const cutoutManualToggleBtn = document.getElementById("cutoutManualToggleBtn");
+  const cutoutManualTools = document.getElementById("cutoutManualTools");
+  const cutoutBrushSizeGroup = document.getElementById("cutoutBrushSizeGroup");
+  const cutoutModeHint = document.getElementById("cutoutModeHint");
+  const WAND_HINT = "Cerchia col dito la zona da recuperare (es. una pianta): pi\u00f9 allarghi il cerchio, pi\u00f9 tolleranza ha la selezione. Due dita = zoom/sposta l'immagine.";
+  const MANUAL_HINT = "Un dito = disegna col pennello/gomma scelto \u00b7 due dita = zoom/sposta l'immagine.";
+
+  function setCutoutMode(mode) {
+    cutoutMode = mode;
+    cutoutWandDrag = null;
+    cutoutDrawing = false;
+    hideCutoutLoupe();
+    if (cutoutManualTools) cutoutManualTools.classList.toggle("hidden", mode !== "manual");
+    if (cutoutBrushSizeGroup) cutoutBrushSizeGroup.classList.toggle("hidden", mode !== "manual");
+    if (cutoutManualToggleBtn) {
+      cutoutManualToggleBtn.textContent = mode === "manual"
+        ? "\u25ce Torna alla bacchetta magica"
+        : "\u2726 Attiva pennello manuale";
+    }
+    if (cutoutModeHint) cutoutModeHint.textContent = mode === "manual" ? MANUAL_HINT : WAND_HINT;
+    scheduleCutoutRender();
+  }
+
+  if (cutoutManualToggleBtn) {
+    cutoutManualToggleBtn.addEventListener("click", () => {
+      setCutoutMode(cutoutMode === "manual" ? "wand" : "manual");
+    });
+  }
 
   document.querySelectorAll(".cutout-tool-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1803,6 +1940,13 @@
   document.getElementById("cutoutCancelBtn").addEventListener("click", () => {
     cutoutModal.classList.add("hidden");
   });
+
+  // Chiamata da Android quando l'utente fa swipe/tasto indietro mentre l'editor
+  // di ritaglio e' aperto: si comporta come "Annulla" (torna alla home), senza
+  // toccare la logica del doppio-indietro-per-uscire (quella vale solo in home).
+  window.closeCutoutEditorFromBack = function () {
+    cutoutModal.classList.add("hidden");
+  };
 
   document.getElementById("cutoutApplyBtn").addEventListener("click", () => {
     if (!cutoutSourceCanvas) {

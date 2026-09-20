@@ -945,47 +945,6 @@ input[type="text"], select {
 }
 .cutout-loading.hidden { display: none; }
 
-/* Striscia di miniature dei soggetti trovati da ML Kit (soggetti multipli):
-   l'utente tocca quella giusta invece di doverla ridisegnare col pennello. */
-.cutout-subject-picker {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 14px;
-  z-index: 6;
-  display: flex;
-  gap: 10px;
-  padding: 10px 14px;
-  overflow-x: auto;
-  background: rgba(13, 13, 18, 0.72);
-}
-.cutout-subject-picker.hidden { display: none; }
-.cutout-subject-thumb {
-  flex: 0 0 auto;
-  width: 60px;
-  height: 60px;
-  border-radius: 10px;
-  border: 2px solid var(--border);
-  background-color: #232328;
-  background-image:
-    linear-gradient(45deg, #2c2c32 25%, transparent 25%),
-    linear-gradient(-45deg, #2c2c32 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #2c2c32 75%),
-    linear-gradient(-45deg, transparent 75%, #2c2c32 75%);
-  background-size: 12px 12px;
-  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
-  overflow: hidden;
-  padding: 0;
-  cursor: pointer;
-}
-.cutout-subject-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
-}
-.cutout-subject-thumb.selected { border-color: var(--accent); }
-
 .spinner {
   width: 30px;
   height: 30px;
