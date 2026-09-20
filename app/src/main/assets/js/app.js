@@ -1338,17 +1338,19 @@
   let cutoutCompositeCanvas = null; // soggetto (+ bordo adesivo) composto qui prima di finire sopra il "fantasma"
   // Opacita' del "fantasma" della foto originale mostrato nelle zone non ancora
   // selezionate (altrimenti li' c'e' solo scacchiera trasparente e non si vede
-  // nulla su cui mirare col pennello o con la bacchetta magica).
+  // nulla su cui mirare col pennello o col lazo).
   const CUTOUT_GHOST_OPACITY = 0.32;
   let cutoutTool = "brush";
   let cutoutBrushSize = 30;
   let cutoutDrawing = false;
-  // Modalita' di interazione col canvas: "wand" (bacchetta magica, attiva di
-  // default: si cerchia con un dito la zona da recuperare) oppure "manual"
+  // Modalita' di interazione col canvas: "loop" (lazo a mano libera, attivo di
+  // default: si traccia un contorno grezzo intorno a quello che si vuole
+  // includere e si aggancia da solo ai bordi reali) oppure "manual"
   // (pennello/gomma classici, da attivare esplicitamente per le rifiniture fini
-  // che la bacchetta magica non riesce a isolare bene).
-  let cutoutMode = "wand";
-  let cutoutWandDrag = null; // {x, y, r} in coordinate canvas, solo mentre si trascina il cerchio
+  // che il lazo non riesce a isolare bene).
+  let cutoutMode = "loop";
+  let cutoutLoopPoints = null; // punti (coordinate canvas) tracciati durante il gesto, solo mentre si disegna
+  let cutoutEdgeMap = null; // Float32Array w*h, mappa dei contorni (gradiente Sobel): calcolata una volta per foto e riusata a ogni lazo
   // Contorno ritaglio (eroderlo/dilata la maschera di N px) e bordo bianco adesivo:
   // entrambi a 0 all'apertura dell'editor, come richiesto ("sempre inizialmente centrale").
   let cutoutMaskOffsetPx = 0;
@@ -1403,6 +1405,7 @@
       cutoutSourceCanvas.width = w;
       cutoutSourceCanvas.height = h;
       cutoutSourceCanvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      cutoutEdgeMap = null; // foto nuova: la mappa dei contorni va ricalcolata
 
       cutoutMaskCanvas = document.createElement("canvas");
       cutoutMaskCanvas.width = w;
@@ -1420,7 +1423,7 @@
       setSlider("cutoutOffsetRange", 0);
       setSlider("cutoutOutlineRange", 0);
       setSlider("cutoutSmoothRange", 0);
-      setCutoutMode("wand");
+      setCutoutMode("loop");
       resetCutoutView();
 
       cutoutModal.classList.remove("hidden");
@@ -1444,7 +1447,7 @@
     setSlider("cutoutOffsetRange", cutoutMaskOffsetPx);
     setSlider("cutoutOutlineRange", cutoutOutlineWidthPx);
     setSlider("cutoutSmoothRange", cutoutSmoothPx);
-    setCutoutMode("wand");
+    setCutoutMode("loop");
     resetCutoutView();
     cutoutModal.classList.remove("hidden");
     renderCutoutPreview();
@@ -1562,7 +1565,7 @@
       showToast("Il ritaglio AI richiede l'app Android: usa il pennello");
       return;
     }
-    setCutoutMode("wand");
+    setCutoutMode("loop");
     cutoutLoading.classList.remove("hidden");
     Android.cutoutSubject(cutoutSourceCanvas.toDataURL("image/jpeg", 0.92));
   }
@@ -1626,21 +1629,31 @@
     cutoutCtx.restore();
     cutoutCtx.drawImage(cutoutCompositeCanvas, 0, 0);
 
-    // Cerchio-guida mentre si trascina la bacchetta magica: stessa canvas/stesso
-    // sistema di coordinate del contenuto, quindi resta perfettamente allineato
-    // anche con zoom/pan attivi (niente canvas separato da tenere sincronizzato).
-    if (cutoutWandDrag) {
+    // Tratto-guida mentre si disegna il lazo: stessa canvas/stesso sistema di
+    // coordinate del contenuto, quindi resta perfettamente allineato anche con
+    // zoom/pan attivi (niente canvas separato da tenere sincronizzato). Si
+    // vede anche il segmento (tratteggiato) che chiuderebbe il lazo se si
+    // rilasciasse ora, cosi' si capisce subito che forma verra' rasterizzata.
+    if (cutoutLoopPoints && cutoutLoopPoints.length > 0) {
       cutoutCtx.save();
       cutoutCtx.strokeStyle = "#5ee6c8";
-      cutoutCtx.lineWidth = Math.max(1, 2 / cutoutZoom);
-      cutoutCtx.setLineDash([8 / cutoutZoom, 6 / cutoutZoom]);
+      cutoutCtx.lineWidth = Math.max(1.5, 2.5 / cutoutZoom);
+      cutoutCtx.lineJoin = "round";
+      cutoutCtx.lineCap = "round";
       cutoutCtx.beginPath();
-      cutoutCtx.arc(cutoutWandDrag.x, cutoutWandDrag.y, Math.max(cutoutWandDrag.r, 3), 0, Math.PI * 2);
+      cutoutCtx.moveTo(cutoutLoopPoints[0].x, cutoutLoopPoints[0].y);
+      for (let i = 1; i < cutoutLoopPoints.length; i++) {
+        cutoutCtx.lineTo(cutoutLoopPoints[i].x, cutoutLoopPoints[i].y);
+      }
       cutoutCtx.stroke();
-      cutoutCtx.fillStyle = "#5ee6c8";
-      cutoutCtx.beginPath();
-      cutoutCtx.arc(cutoutWandDrag.x, cutoutWandDrag.y, Math.max(3 / cutoutZoom, 1.5), 0, Math.PI * 2);
-      cutoutCtx.fill();
+      if (cutoutLoopPoints.length > 1) {
+        cutoutCtx.setLineDash([7 / cutoutZoom, 6 / cutoutZoom]);
+        cutoutCtx.lineWidth = Math.max(1, 1.5 / cutoutZoom);
+        cutoutCtx.beginPath();
+        cutoutCtx.moveTo(cutoutLoopPoints[cutoutLoopPoints.length - 1].x, cutoutLoopPoints[cutoutLoopPoints.length - 1].y);
+        cutoutCtx.lineTo(cutoutLoopPoints[0].x, cutoutLoopPoints[0].y);
+        cutoutCtx.stroke();
+      }
       cutoutCtx.restore();
     }
   }
@@ -1669,70 +1682,118 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Bacchetta magica: si cerchia con un dito la zona da recuperare (es. una
-  // pianta che l'AI ha scartato). Il punto di partenza del gesto e' il seme, il
-  // raggio del cerchio tracciato imposta la tolleranza (cerchio piu' grande =
-  // selezione piu' permissiva sui colori vicini): al rilascio si esegue un
-  // flood-fill classico (4-connesso, iterativo con stack per evitare overflow
-  // su selezioni grandi) sui pixel della foto sorgente, e i pixel selezionati
-  // vengono aggiunti alla maschera (stesso effetto del pennello "ripristina",
-  // ma con un contorno calcolato invece che disegnato a mano).
+  // Lazo a mano libera: si traccia un contorno grezzo e impreciso intorno a
+  // quello che si vuole includere (es. il muro con i graffiti), e al rilascio
+  // il contorno si aggancia da solo ai bordi reali dell'immagine. A differenza
+  // della vecchia bacchetta magica (basata sulla somiglianza di colore) qui si
+  // usa il contrasto locale (gradiente Sobel): funziona anche su superfici con
+  // colori interni molto vari, perche' non dipende dal colore ma da dove ci
+  // sono davvero dei bordi.
+  //
+  // Limite onesto: essendo un algoritmo che parte dal lazo grezzo e lo
+  // ESPANDE fino al bordo vero, puo' correggere un lazo tracciato troppo
+  // all'interno del soggetto, ma non un lazo tracciato troppo all'ESTERNO
+  // (quella parte in eccesso resta selezionata). Conviene tracciare il lazo
+  // un po' dentro al soggetto piuttosto che scavalcarne i bordi; l'eventuale
+  // eccesso si toglie col pennello/gomma manuale.
   // ---------------------------------------------------------------------------
-  const WAND_MIN_TOLERANCE = 14;
-  const WAND_MAX_TOLERANCE = 150;
-  const WAND_RADIUS_TO_TOLERANCE = 1.1;
+  const LOOP_MAX_GROWTH = 60; // px oltre il lazo grezzo, oltre cui la crescita si ferma comunque
+  const LOOP_EDGE_THRESHOLD = 60; // soglia di gradiente sopra la quale si considera un bordo vero
 
-  function wandRadiusToTolerance(r) {
-    return Math.min(WAND_MAX_TOLERANCE, WAND_MIN_TOLERANCE + r * WAND_RADIUS_TO_TOLERANCE);
+  /** Mappa dei contorni (intensita' del bordo per ogni pixel, via gradiente
+   *  Sobel su scala di grigi) calcolata una sola volta per foto e riusata a
+   *  ogni lazo: e' il costo computazionale principale dello strumento, quindi
+   *  conviene calcolarla una volta sola invece che a ogni gesto. */
+  function ensureCutoutEdgeMap() {
+    if (cutoutEdgeMap) return cutoutEdgeMap;
+    const w = cutoutSourceCanvas.width, h = cutoutSourceCanvas.height;
+    const src = cutoutSourceCanvas.getContext("2d").getImageData(0, 0, w, h).data;
+    const gray = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const o = i * 4;
+      gray[i] = 0.299 * src[o] + 0.587 * src[o + 1] + 0.114 * src[o + 2];
+    }
+    const mag = new Float32Array(w * h);
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        const gx = -gray[i - w - 1] - 2 * gray[i - 1] - gray[i + w - 1]
+          + gray[i - w + 1] + 2 * gray[i + 1] + gray[i + w + 1];
+        const gy = -gray[i - w - 1] - 2 * gray[i - w] - gray[i - w + 1]
+          + gray[i + w - 1] + 2 * gray[i + w] + gray[i + w + 1];
+        mag[i] = Math.sqrt(gx * gx + gy * gy);
+      }
+    }
+    cutoutEdgeMap = mag;
+    return mag;
   }
 
-  function runMagicWand(seed, radiusPx) {
-    if (!cutoutSourceCanvas || !cutoutMaskCanvas) return;
+  function runLoopSelection(points) {
+    if (!cutoutSourceCanvas || !cutoutMaskCanvas || points.length < 3) return;
     const w = cutoutSourceCanvas.width, h = cutoutSourceCanvas.height;
-    const sx = Math.round(seed.x), sy = Math.round(seed.y);
-    if (sx < 0 || sy < 0 || sx >= w || sy >= h) return;
 
-    const tolerance = wandRadiusToTolerance(radiusPx);
-    const tol2 = tolerance * tolerance;
+    // Rasterizza il lazo grezzo con l'API Canvas: gestisce da sola poligoni
+    // irregolari/autointersecanti, molto piu' robusto di uno scanline scritto
+    // a mano per un tratto disegnato a mano libera.
+    const roughCanvas = document.createElement("canvas");
+    roughCanvas.width = w;
+    roughCanvas.height = h;
+    const rctx = roughCanvas.getContext("2d");
+    rctx.fillStyle = "#fff";
+    rctx.beginPath();
+    rctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) rctx.lineTo(points[i].x, points[i].y);
+    rctx.closePath();
+    rctx.fill();
+    const roughAlpha = rctx.getImageData(0, 0, w, h).data;
 
-    const srcData = cutoutSourceCanvas.getContext("2d").getImageData(0, 0, w, h).data;
-    const seedIdx = (sy * w + sx) * 4;
-    const seedR = srcData[seedIdx], seedG = srcData[seedIdx + 1], seedB = srcData[seedIdx + 2];
+    const selected = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      if (roughAlpha[i * 4 + 3] > 0) selected[i] = 1;
+    }
 
-    const visited = new Uint8Array(w * h);
-    const stack = new Int32Array(w * h);
-    let sp = 0;
-    const startP = sy * w + sx;
-    stack[sp++] = startP;
-    visited[startP] = 1;
+    // Frontiera iniziale: i pixel del lazo grezzo che confinano gia' con
+    // pixel non selezionati (il suo bordo).
+    const queue = [];
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (!selected[i]) continue;
+        if ((x > 0 && !selected[i - 1]) || (x < w - 1 && !selected[i + 1]) ||
+            (y > 0 && !selected[i - w]) || (y < h - 1 && !selected[i + w])) {
+          queue.push(i);
+        }
+      }
+    }
 
-    const selection = new Uint8Array(w * h);
-
-    while (sp > 0) {
-      const p = stack[--sp];
-      selection[p] = 1;
-      const px = p % w;
-      const py = (p - px) / w;
-      const left = px > 0 ? p - 1 : -1;
-      const right = px < w - 1 ? p + 1 : -1;
-      const up = py > 0 ? p - w : -1;
-      const down = py < h - 1 ? p + w : -1;
-      for (const np of [left, right, up, down]) {
-        if (np < 0 || visited[np]) continue;
-        visited[np] = 1;
-        const nIdx = np * 4;
-        const dr = srcData[nIdx] - seedR;
-        const dg = srcData[nIdx + 1] - seedG;
-        const db = srcData[nIdx + 2] - seedB;
-        if (dr * dr + dg * dg + db * db <= tol2) stack[sp++] = np;
+    const edgeMap = ensureCutoutEdgeMap();
+    const depth = new Int16Array(w * h); // 0 = gia' dentro il lazo grezzo
+    let qi = 0;
+    while (qi < queue.length) {
+      const p = queue[qi++];
+      const px = p % w, py = (p - px) / w;
+      const d = depth[p];
+      if (d >= LOOP_MAX_GROWTH) continue;
+      const neighbors = [
+        px > 0 ? p - 1 : -1, px < w - 1 ? p + 1 : -1, py > 0 ? p - w : -1, py < h - 1 ? p + w : -1,
+      ];
+      for (const np of neighbors) {
+        if (np < 0 || selected[np]) continue;
+        // Non attraversare un bordo vero: se qui il gradiente e' alto, la
+        // crescita si ferma proprio li' (e' cosi' che il contorno "si
+        // aggancia" al bordo reale piu' vicino).
+        if (edgeMap[np] > LOOP_EDGE_THRESHOLD) continue;
+        selected[np] = 1;
+        depth[np] = d + 1;
+        queue.push(np);
       }
     }
 
     const mctx = cutoutMaskCanvas.getContext("2d");
     const maskImgData = mctx.getImageData(0, 0, w, h);
     const md = maskImgData.data;
-    for (let i = 0; i < selection.length; i++) {
-      if (!selection[i]) continue;
+    for (let i = 0; i < selected.length; i++) {
+      if (!selected[i]) continue;
       const mi = i * 4;
       md[mi] = 255; md[mi + 1] = 255; md[mi + 2] = 255; md[mi + 3] = 255;
     }
@@ -1810,7 +1871,7 @@
     if (!cutoutSourceCanvas) return;
     if (evt.touches && evt.touches.length >= 2) {
       cutoutDrawing = false;
-      cutoutWandDrag = null;
+      cutoutLoopPoints = null;
       hideCutoutLoupe();
       const [t0, t1] = evt.touches;
       cutoutPinch = {
@@ -1829,7 +1890,7 @@
       cutoutPaintAt(p.x, p.y);
       showCutoutLoupe(evt, p);
     } else {
-      cutoutWandDrag = { x: p.x, y: p.y, r: 0 };
+      cutoutLoopPoints = [p];
       scheduleCutoutRender();
     }
     evt.preventDefault();
@@ -1855,10 +1916,17 @@
       cutoutPaintAt(p.x, p.y);
       showCutoutLoupe(evt, p);
     } else {
-      if (!cutoutWandDrag) return;
+      if (!cutoutLoopPoints) return;
       const p = cutoutCanvasPoint(evt);
-      cutoutWandDrag.r = Math.hypot(p.x - cutoutWandDrag.x, p.y - cutoutWandDrag.y);
-      scheduleCutoutRender();
+      const last = cutoutLoopPoints[cutoutLoopPoints.length - 1];
+      // Aggiunge un punto solo se ci si e' mossi abbastanza: un tratto a mano
+      // libera genera moltissimi eventi ravvicinati, e un poligono con troppi
+      // punti quasi coincidenti rallenta la rasterizzazione senza aggiungere
+      // precisione utile.
+      if (Math.hypot(p.x - last.x, p.y - last.y) >= 3 / cutoutZoom) {
+        cutoutLoopPoints.push(p);
+        scheduleCutoutRender();
+      }
     }
     evt.preventDefault();
   }
@@ -1869,21 +1937,22 @@
     if (cutoutMode === "manual") {
       cutoutDrawing = false;
       hideCutoutLoupe();
-    } else if (cutoutWandDrag) {
-      const { x, y, r } = cutoutWandDrag;
-      cutoutWandDrag = null;
+    } else if (cutoutLoopPoints) {
+      const points = cutoutLoopPoints;
+      cutoutLoopPoints = null;
       scheduleCutoutRender();
+      if (points.length < 3) return; // gesto troppo corto/un tap: nulla da rasterizzare
       const loadingText = cutoutLoading.querySelector("span");
       const prevText = loadingText ? loadingText.textContent : null;
       if (loadingText) loadingText.textContent = "Selezione in corso\u2026";
       cutoutLoading.classList.remove("hidden");
-      // Doppio rAF: il primo fa consumare il ridisegno che toglie il cerchio-guida,
-      // il secondo garantisce che lo spinner sia gia' visibile a schermo prima che
-      // il flood-fill (sincrono, su foto grandi puo' richiedere qualche centinaio
-      // di millisecondi) blocchi il thread principale.
+      // Doppio rAF: il primo fa consumare il ridisegno che toglie il tratto-
+      // guida, il secondo garantisce che lo spinner sia gia' visibile a
+      // schermo prima che il calcolo (sincrono: mappa dei contorni la prima
+      // volta per foto, poi la crescita del lazo) blocchi il thread principale.
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          runMagicWand({ x, y }, r);
+          runLoopSelection(points);
           cutoutLoading.classList.add("hidden");
           if (loadingText && prevText != null) loadingText.textContent = prevText;
         });
@@ -1903,35 +1972,35 @@
   if (cutoutZoomResetBtn) cutoutZoomResetBtn.addEventListener("click", resetCutoutView);
 
   // ---------------------------------------------------------------------------
-  // Toggle "bacchetta magica" (default) <-> "pennello manuale" (a richiesta,
-  // solo per rifinire i casi particolari che la bacchetta non isola bene).
+  // Toggle "lazo" (default) <-> "pennello manuale" (a richiesta, solo per
+  // rifinire i casi particolari che il lazo non isola bene).
   // ---------------------------------------------------------------------------
   const cutoutManualToggleBtn = document.getElementById("cutoutManualToggleBtn");
   const cutoutManualTools = document.getElementById("cutoutManualTools");
   const cutoutBrushSizeGroup = document.getElementById("cutoutBrushSizeGroup");
   const cutoutModeHint = document.getElementById("cutoutModeHint");
-  const WAND_HINT = "Cerchia col dito la zona da recuperare (es. una pianta): pi\u00f9 allarghi il cerchio, pi\u00f9 tolleranza ha la selezione. Due dita = zoom/sposta l'immagine.";
+  const LOOP_HINT = "Traccia un contorno grezzo intorno a quello che vuoi includere (es. il muro): si aggancia da solo ai bordi reali. Meglio restare un po' dentro al soggetto che scavalcarlo. Due dita = zoom/sposta l'immagine.";
   const MANUAL_HINT = "Un dito = disegna col pennello/gomma scelto \u00b7 due dita = zoom/sposta l'immagine.";
 
   function setCutoutMode(mode) {
     cutoutMode = mode;
-    cutoutWandDrag = null;
+    cutoutLoopPoints = null;
     cutoutDrawing = false;
     hideCutoutLoupe();
     if (cutoutManualTools) cutoutManualTools.classList.toggle("hidden", mode !== "manual");
     if (cutoutBrushSizeGroup) cutoutBrushSizeGroup.classList.toggle("hidden", mode !== "manual");
     if (cutoutManualToggleBtn) {
       cutoutManualToggleBtn.textContent = mode === "manual"
-        ? "\u25ce Torna alla bacchetta magica"
+        ? "\u25ce Torna al lazo"
         : "\u2726 Attiva pennello manuale";
     }
-    if (cutoutModeHint) cutoutModeHint.textContent = mode === "manual" ? MANUAL_HINT : WAND_HINT;
+    if (cutoutModeHint) cutoutModeHint.textContent = mode === "manual" ? MANUAL_HINT : LOOP_HINT;
     scheduleCutoutRender();
   }
 
   if (cutoutManualToggleBtn) {
     cutoutManualToggleBtn.addEventListener("click", () => {
-      setCutoutMode(cutoutMode === "manual" ? "wand" : "manual");
+      setCutoutMode(cutoutMode === "manual" ? "loop" : "manual");
     });
   }
 

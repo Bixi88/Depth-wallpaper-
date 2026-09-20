@@ -687,7 +687,7 @@ class MainActivity : ComponentActivity() {
          * lasciare scegliere all'utente tra piu' oggetti rilevati, ma sui casi reali
          * (es. una pianta articolata sullo sfondo) il modello continuava a trovare
          * solo il soggetto piu' "saliente" comunque: tornati quindi al singolo
-         * soggetto centrale, con la bacchetta magica lato JS per recuperare a mano
+         * soggetto centrale, con il lazo lato JS per recuperare a mano
          * eventuali altre zone che l'AI ha scartato.
          */
         @JavascriptInterface
@@ -712,7 +712,7 @@ class MainActivity : ComponentActivity() {
                         .addOnSuccessListener { result ->
                             val fg = result.foregroundBitmap
                             if (fg == null) {
-                                notifySubjectCutout(null, "Nessun soggetto riconosciuto: usa la bacchetta magica")
+                                notifySubjectCutout(null, "Nessun soggetto riconosciuto: usa il lazo")
                             } else {
                                 val out = ByteArrayOutputStream()
                                 fg.compress(Bitmap.CompressFormat.PNG, 100, out)
@@ -722,7 +722,7 @@ class MainActivity : ComponentActivity() {
                         }
                         .addOnFailureListener {
                             // Es. modello non ancora scaricato al primo avvio dopo l'installazione.
-                            notifySubjectCutout(null, "Ritaglio AI non disponibile ora: usa la bacchetta magica")
+                            notifySubjectCutout(null, "Ritaglio AI non disponibile ora: usa il lazo")
                         }
                 } catch (e: Exception) {
                     notifySubjectCutout(null, "Errore durante il ritaglio automatico")
