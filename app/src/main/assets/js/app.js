@@ -1535,11 +1535,14 @@
     return c;
   }
 
+  const cutoutSubjectPicker = document.getElementById("cutoutSubjectPicker");
+
   function requestAiCutout() {
     if (!isNative || !cutoutSourceCanvas) {
       showToast("Il ritaglio AI richiede l'app Android: usa il pennello");
       return;
     }
+    cutoutSubjectPicker.classList.add("hidden");
     cutoutLoading.classList.remove("hidden");
     Android.cutoutSubject(cutoutSourceCanvas.toDataURL("image/jpeg", 0.92));
   }
@@ -1550,6 +1553,45 @@
       showToast(errorMessage || "Soggetto non riconosciuto: usa il pennello");
       return;
     }
+    applyCutoutMask(maskDataUrl);
+  };
+
+  /** Risultato "soggetti multipli": invece di un solo ritaglio gia' scelto da
+   *  ML Kit, arriva la lista di tutti i soggetti riconosciuti (utile sulle foto
+   *  dove il soggetto che interessa non e' quello piu' "saliente", es. una
+   *  pianta articolata dietro a un'insegna). Si mostra una miniatura per
+   *  ciascuno e si preseleziona il primo; l'utente puo' cambiarlo con un tocco,
+   *  poi rifinire i bordi col pennello come sempre. */
+  window.onSubjectCutoutList = function (dataUrls) {
+    cutoutLoading.classList.add("hidden");
+    if (!dataUrls || !dataUrls.length) {
+      showToast("Nessun soggetto riconosciuto: usa il pennello");
+      return;
+    }
+    cutoutSubjectPicker.innerHTML = "";
+    dataUrls.forEach((url) => {
+      const thumb = document.createElement("button");
+      thumb.type = "button";
+      thumb.className = "cutout-subject-thumb";
+      const img = document.createElement("img");
+      img.src = url;
+      thumb.appendChild(img);
+      thumb.addEventListener("click", () => selectCutoutSubject(url, thumb));
+      cutoutSubjectPicker.appendChild(thumb);
+    });
+    cutoutSubjectPicker.classList.remove("hidden");
+    // Preseleziona il primo soggetto (in genere il piu' grande) cosi' l'utente
+    // vede subito un risultato, ed eventualmente ne sceglie un altro.
+    selectCutoutSubject(dataUrls[0], cutoutSubjectPicker.firstElementChild);
+  };
+
+  function selectCutoutSubject(dataUrl, thumbEl) {
+    Array.from(cutoutSubjectPicker.children).forEach((c) => c.classList.remove("selected"));
+    if (thumbEl) thumbEl.classList.add("selected");
+    applyCutoutMask(dataUrl);
+  }
+
+  function applyCutoutMask(maskDataUrl) {
     const maskImg = new Image();
     maskImg.onload = () => {
       const mctx = cutoutMaskCanvas.getContext("2d");
@@ -1558,7 +1600,7 @@
       renderCutoutPreview();
     };
     maskImg.src = maskDataUrl;
-  };
+  }
 
   function renderCutoutPreview() {
     cutoutCtx.clearRect(0, 0, cutoutCanvas.width, cutoutCanvas.height);

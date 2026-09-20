@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.net.Uri
@@ -515,6 +516,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** Come notifySubjectCutout, ma per il risultato "soggetti multipli": ogni
+     *  elemento e' un PNG data URL a grandezza intera (soggetto posizionato nel
+     *  suo riquadro originale, resto trasparente), cosi' l'editor puo' mostrarli
+     *  come miniature e l'utente sceglie quale usare. */
+    private fun notifySubjectCutoutList(pngDataUrls: List<String>) {
+        runOnUiThread {
+            val arrArg = pngDataUrls.joinToString(prefix = "[", postfix = "]") { "'${it}'" }
+            webView.evaluateJavascript(
+                "window.onSubjectCutoutList && window.onSubjectCutoutList($arrArg);",
+                null
+            )
+        }
+    }
+
     private fun notifyImageSaved(success: Boolean) {
         runOnUiThread {
             webView.evaluateJavascript(
@@ -643,11 +658,16 @@ class MainActivity : ComponentActivity() {
         }
 
         /**
-         * Ritaglio automatico del soggetto tramite ML Kit Subject Segmentation
+         * Ritaglio automatico del/dei soggetto/i tramite ML Kit Subject Segmentation
          * (modello on-device scaricato via Google Play services, nessun upload verso
-         * internet). Riceve la foto scelta come data URL, restituisce a JS il PNG
-         * del solo soggetto (sfondo reso trasparente) tramite window.onSubjectCutout,
-         * cosi' l'editor puo' comporlo e l'utente rifinire i bordi col pennello.
+         * internet). A differenza di prima non ci si affida piu' a un solo soggetto
+         * "fuso" scelto dal modello (che su forme articolate come rami/piante spesso
+         * lo ignora del tutto a favore del soggetto piu' saliente): con
+         * enableMultipleSubjects si ottiene la lista di TUTTI i soggetti riconosciuti,
+         * ciascuno con la propria maschera. Li restituiamo tutti a JS (come PNG a
+         * grandezza intera, soggetto nel suo riquadro originale) tramite
+         * window.onSubjectCutoutList, cosi' l'utente sceglie quale usare come base
+         * da rifinire col pennello.
          */
         @JavascriptInterface
         fun cutoutSubject(imageDataUrl: String) {
@@ -661,22 +681,44 @@ class MainActivity : ComponentActivity() {
                         return@runOnUiThread
                     }
 
+                    val subjectResultOptions = SubjectSegmenterOptions.SubjectResultOptions.Builder()
+                        .enableSubjectBitmap()
+                        .build()
                     val options = SubjectSegmenterOptions.Builder()
-                        .enableForegroundBitmap()
+                        .enableMultipleSubjects(subjectResultOptions)
                         .build()
                     val segmenter = SubjectSegmentation.getClient(options)
                     val input = InputImage.fromBitmap(bitmap, 0)
 
                     segmenter.process(input)
                         .addOnSuccessListener { result ->
-                            val fg = result.foregroundBitmap
-                            if (fg == null) {
+                            val subjects = result.subjects
+                            if (subjects.isEmpty()) {
+                                notifySubjectCutout(null, "Nessun soggetto riconosciuto: usa il pennello")
+                                return@addOnSuccessListener
+                            }
+                            // Ogni Subject.bitmap e' ritagliato al suo riquadro (startX/startY/
+                            // width/height): lo ricomponiamo su un canvas della dimensione
+                            // originale, cosi' resta allineato 1:1 con la foto sorgente in JS.
+                            val dataUrls = subjects.mapNotNull { subject ->
+                                val subjectBitmap = subject.bitmap ?: return@mapNotNull null
+                                val full = Bitmap.createBitmap(
+                                    bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888
+                                )
+                                Canvas(full).drawBitmap(
+                                    subjectBitmap,
+                                    subject.startX.toFloat(),
+                                    subject.startY.toFloat(),
+                                    null
+                                )
+                                val out = ByteArrayOutputStream()
+                                full.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                "data:image/png;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+                            }
+                            if (dataUrls.isEmpty()) {
                                 notifySubjectCutout(null, "Nessun soggetto riconosciuto: usa il pennello")
                             } else {
-                                val out = ByteArrayOutputStream()
-                                fg.compress(Bitmap.CompressFormat.PNG, 100, out)
-                                val b64 = Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
-                                notifySubjectCutout("data:image/png;base64,$b64", null)
+                                notifySubjectCutoutList(dataUrls)
                             }
                         }
                         .addOnFailureListener {
