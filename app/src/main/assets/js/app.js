@@ -1335,6 +1335,11 @@
   let cutoutSourceCanvas = null;
   let cutoutMaskCanvas = null;
   let cutoutMaskedSubjectCanvas = null;
+  let cutoutCompositeCanvas = null; // soggetto (+ bordo adesivo) composto qui prima di finire sopra il "fantasma"
+  // Opacita' del "fantasma" della foto originale mostrato nelle zone non ancora
+  // selezionate (altrimenti li' c'e' solo scacchiera trasparente e non si vede
+  // nulla su cui mirare col pennello o con la bacchetta magica).
+  const CUTOUT_GHOST_OPACITY = 0.32;
   let cutoutTool = "brush";
   let cutoutBrushSize = 30;
   let cutoutDrawing = false;
@@ -1583,24 +1588,43 @@
   }
 
   function renderCutoutPreview() {
-    cutoutCtx.clearRect(0, 0, cutoutCanvas.width, cutoutCanvas.height);
+    const w = cutoutCanvas.width, h = cutoutCanvas.height;
 
     let effectiveMask = cutoutMaskOffsetPx
       ? erodeDilateAlpha(cutoutMaskCanvas, cutoutMaskOffsetPx)
       : cutoutMaskCanvas;
     if (cutoutSmoothPx > 0) effectiveMask = smoothAlphaMask(effectiveMask, cutoutSmoothPx);
 
+    // Soggetto (+ eventuale bordo bianco adesivo) composti su un canvas a parte:
+    // le operazioni "destination-in" qui sotto cancellerebbero il fantasma della
+    // foto originale se lavorassero direttamente sul canvas visibile.
+    if (!cutoutCompositeCanvas) cutoutCompositeCanvas = document.createElement("canvas");
+    cutoutCompositeCanvas.width = w;
+    cutoutCompositeCanvas.height = h;
+    const cctx = cutoutCompositeCanvas.getContext("2d");
+    cctx.clearRect(0, 0, w, h);
+
     if (cutoutOutlineWidthPx > 0) {
       let outlineMask = erodeDilateAlpha(effectiveMask, cutoutOutlineWidthPx);
       if (cutoutSmoothPx > 0) outlineMask = smoothAlphaMask(outlineMask, cutoutSmoothPx);
-      cutoutCtx.fillStyle = "#ffffff";
-      cutoutCtx.fillRect(0, 0, cutoutCanvas.width, cutoutCanvas.height);
-      cutoutCtx.globalCompositeOperation = "destination-in";
-      cutoutCtx.drawImage(outlineMask, 0, 0);
-      cutoutCtx.globalCompositeOperation = "source-over";
+      cctx.fillStyle = "#ffffff";
+      cctx.fillRect(0, 0, w, h);
+      cctx.globalCompositeOperation = "destination-in";
+      cctx.drawImage(outlineMask, 0, 0);
+      cctx.globalCompositeOperation = "source-over";
     }
+    cctx.drawImage(buildMaskedSubject(effectiveMask), 0, 0);
 
-    cutoutCtx.drawImage(buildMaskedSubject(effectiveMask), 0, 0);
+    // Composizione finale sul canvas visibile: prima il fantasma della foto
+    // originale in trasparenza (cosi' si vede sempre dove sono le zone scartate
+    // dall'AI, es. una pianta, invece della sola scacchiera vuota), poi il
+    // soggetto (+ bordo) a piena opacita' sopra.
+    cutoutCtx.clearRect(0, 0, w, h);
+    cutoutCtx.save();
+    cutoutCtx.globalAlpha = CUTOUT_GHOST_OPACITY;
+    cutoutCtx.drawImage(cutoutSourceCanvas, 0, 0);
+    cutoutCtx.restore();
+    cutoutCtx.drawImage(cutoutCompositeCanvas, 0, 0);
 
     // Cerchio-guida mentre si trascina la bacchetta magica: stessa canvas/stesso
     // sistema di coordinate del contenuto, quindi resta perfettamente allineato
@@ -1638,7 +1662,10 @@
     mctx.arc(x, y, cutoutBrushSize / 2, 0, Math.PI * 2);
     mctx.fill();
     mctx.globalCompositeOperation = "source-over";
-    scheduleCutoutRender();
+    // Sincrono (non scheduleCutoutRender/rAF): la lente viene disegnata subito
+    // dopo questa chiamata e deve leggere il canvas gia' aggiornato col tratto
+    // appena fatto, non quello del frame precedente.
+    renderCutoutPreview();
   }
 
   // ---------------------------------------------------------------------------
@@ -1722,12 +1749,16 @@
   const cutoutLoupe = document.getElementById("cutoutLoupe");
   const cutoutLoupeCtx = cutoutLoupe ? cutoutLoupe.getContext("2d") : null;
   const LOUPE_SIZE = 120;
-  const LOUPE_ZOOM = 3;
 
   function showCutoutLoupe(evt, canvasPoint) {
     if (!cutoutLoupeCtx) return;
     const p = evt.touches ? evt.touches[0] : evt;
-    const cropSide = LOUPE_SIZE / LOUPE_ZOOM;
+    // Lo zoom si adatta alla dimensione del pennello: il cerchio del pennello
+    // occupa sempre circa il 40% della lente, lasciando margine sufficiente
+    // per capire cosa c'e' intorno (prima, con zoom fisso, un pennello grande
+    // riempiva quasi tutta la lente e non si vedeva altro).
+    const cropSide = Math.max(cutoutBrushSize * 2.5, 36);
+    const zoom = LOUPE_SIZE / cropSide;
 
     cutoutLoupeCtx.clearRect(0, 0, LOUPE_SIZE, LOUPE_SIZE);
     cutoutLoupeCtx.fillStyle = "#1a1a22";
@@ -1741,7 +1772,7 @@
     cutoutLoupeCtx.strokeStyle = cutoutTool === "eraser" ? "#ff5470" : "#5ee6c8";
     cutoutLoupeCtx.lineWidth = 2;
     cutoutLoupeCtx.beginPath();
-    cutoutLoupeCtx.arc(LOUPE_SIZE / 2, LOUPE_SIZE / 2, (cutoutBrushSize / 2) * LOUPE_ZOOM, 0, Math.PI * 2);
+    cutoutLoupeCtx.arc(LOUPE_SIZE / 2, LOUPE_SIZE / 2, (cutoutBrushSize / 2) * zoom, 0, Math.PI * 2);
     cutoutLoupeCtx.stroke();
     cutoutLoupeCtx.beginPath();
     cutoutLoupeCtx.moveTo(LOUPE_SIZE / 2 - 8, LOUPE_SIZE / 2);
