@@ -939,14 +939,31 @@
 
   let colorPopoverEl = null;
 
+  // Segnala al lato Android quando il popover colore e' aperto/chiuso: come
+  // per l'editor di ritaglio, serve al tasto/gesto indietro di sistema per
+  // sapere che deve chiudere solo il popover (non far scattare il doppio-
+  // indietro-per-uscire, che vale solo quando non c'e' nessun overlay aperto).
+  function notifyColorPopoverState(open) {
+    if (isNative && typeof Android.setColorPopoverOpen === "function") {
+      Android.setColorPopoverOpen(open);
+    }
+  }
+
   function closeColorPopover() {
     if (colorPopoverEl) {
       colorPopoverEl.remove();
       colorPopoverEl = null;
       document.removeEventListener("mousedown", onColorPopoverOutside, true);
       document.removeEventListener("touchstart", onColorPopoverOutside, true);
+      notifyColorPopoverState(false);
     }
   }
+
+  // Chiamata da Android quando l'utente fa swipe/tasto indietro mentre il
+  // popover colore e' aperto: si comporta come un tocco fuori dal popover.
+  window.closeColorPopoverFromBack = function () {
+    closeColorPopover();
+  };
 
   function onColorPopoverOutside(e) {
     if (colorPopoverEl && !colorPopoverEl.contains(e.target)) closeColorPopover();
@@ -992,6 +1009,7 @@
     backdrop.appendChild(sheet);
     document.body.appendChild(backdrop);
     colorPopoverEl = backdrop;
+    notifyColorPopoverState(true);
 
     const preview = sheet.querySelector("#cpPreview");
     const hueEl = sheet.querySelector("#cpHue");
@@ -2053,7 +2071,16 @@
       cutoutModal.classList.add("hidden");
       return;
     }
-    const dataUrl = cutoutCanvas.toDataURL("image/png");
+    // IMPORTANTE: si esporta cutoutCompositeCanvas (solo soggetto + eventuale
+    // bordo adesivo), MAI cutoutCanvas. cutoutCanvas e' il canvas mostrato a
+    // schermo nell'editor e include sempre il "fantasma" della foto originale
+    // (vedi CUTOUT_GHOST_OPACITY in renderCutoutPreview) come aiuto visivo per
+    // mirare col pennello/lazo: e' solo un aiuto per l'editing, non deve mai
+    // finire nell'immagine salvata, altrimenti quel velo semi-trasparente
+    // resta incollato sul soggetto esportato e, una volta disegnato sopra
+    // all'orologio nello sfondo finale, sembra che sia l'orologio a essere
+    // diventato trasparente.
+    const dataUrl = cutoutCompositeCanvas.toDataURL("image/png");
     const img = new Image();
     img.onload = () => {
       state.fg.img = img;
@@ -2305,6 +2332,21 @@
   const eyedropBubble = document.getElementById("eyedropBubble");
   const eyedropSwatch = document.getElementById("eyedropSwatch");
   const eyedropHex = document.getElementById("eyedropHex");
+
+  // Stesso motivo del popover colore: senza questo, lo swipe/tasto indietro
+  // mentre si sta prelevando un colore dalla foto non viene riconosciuto come
+  // "overlay aperto" e fa scattare il doppio-indietro-per-uscire.
+  if (isNative && typeof Android.setColorPopoverOpen === "function") {
+    new MutationObserver(() => {
+      Android.setColorPopoverOpen(!eyedropOverlay.classList.contains("hidden"));
+    }).observe(eyedropOverlay, { attributes: true, attributeFilter: ["class"] });
+  }
+  window.closeColorPopoverFromBack = (function (orig) {
+    return function () {
+      if (eyedrop) stopEyedrop();
+      orig();
+    };
+  })(window.closeColorPopoverFromBack);
 
   let eyedrop = null;          // { input, btn } quando il prelievo e' attivo
   let eyedropCanvas = null;    // copia con i soli livelli immagine

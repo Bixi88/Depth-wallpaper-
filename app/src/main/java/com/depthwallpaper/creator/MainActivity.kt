@@ -78,6 +78,13 @@ class MainActivity : ComponentActivity() {
     @Volatile
     private var isCutoutEditorOpen = false
 
+    /** Aggiornato da JS (setColorPopoverOpen) mentre il popover di selezione
+     *  colore o il prelievo pipetta sono aperti: stesso motivo di
+     *  isCutoutEditorOpen sopra, ma per un overlay piu' piccolo che vive dentro
+     *  la schermata principale invece che in un modale a se stante. */
+    @Volatile
+    private var isColorPopoverOpen = false
+
     /** Stato del "premi di nuovo per uscire" in home: true nella finestra di
      *  tempo subito dopo il primo swipe/tasto indietro, durante la quale un
      *  secondo swipe chiude davvero l'app. */
@@ -134,14 +141,22 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Nella finestra di ritaglio lo swipe/tasto indietro chiude sempre l'editor
-     * riportando alla home (mai l'app): lo delega a JS, che si comporta come il
-     * tasto "Annulla". In home, invece, il primo swipe indietro NON chiude l'app:
-     * mostra un avviso e serve un secondo swipe entro 2 secondi per uscire
-     * davvero, cosi' uno swipe accidentale (frequente con la gesture di sistema)
-     * non fa chiudere l'app di colpo.
+     * Il popover colore/pipetta (piu' "vicino" all'utente) chiude solo se
+     * stesso. Nella finestra di ritaglio lo swipe/tasto indietro chiude sempre
+     * l'editor riportando alla home (mai l'app): lo delega a JS, che si
+     * comporta come il tasto "Annulla". In home, invece, il primo swipe
+     * indietro NON chiude l'app: mostra un avviso e serve un secondo swipe
+     * entro 2 secondi per uscire davvero, cosi' uno swipe accidentale
+     * (frequente con la gesture di sistema) non fa chiudere l'app di colpo.
      */
     override fun onBackPressed() {
+        if (isColorPopoverOpen) {
+            webView.evaluateJavascript(
+                "window.closeColorPopoverFromBack && window.closeColorPopoverFromBack();",
+                null
+            )
+            return
+        }
         if (isCutoutEditorOpen) {
             webView.evaluateJavascript(
                 "window.closeCutoutEditorFromBack && window.closeCutoutEditorFromBack();",
@@ -736,6 +751,13 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun setCutoutEditorOpen(open: Boolean) {
             isCutoutEditorOpen = open
+        }
+
+        /** Aggiornato da JS ogni volta che il popover di selezione colore o il
+         *  prelievo pipetta si aprono/chiudono: usato da onBackPressed. */
+        @JavascriptInterface
+        fun setColorPopoverOpen(open: Boolean) {
+            isColorPopoverOpen = open
         }
 
         /** Chiamato dal JS con il PNG renderizzato (data URL) pronto per l'export. */
