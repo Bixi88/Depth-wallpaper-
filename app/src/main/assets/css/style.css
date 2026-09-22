@@ -113,6 +113,20 @@
   font-style: normal;
   font-display: block;
 }
+@font-face {
+  font-family: "Klorhine";
+  src: url("../fonts/Klorhine-Regular.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Raptors";
+  src: url("../fonts/Raptors.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
 /* --- ATTENZIONE: versione DEMO (uso personale/anteprima), non licenza commerciale.
    Prima di pubblicare l'app sostituire il file con la versione completa acquistata
    da Graphicfresh (font "Calcio"), altrimenti si rischia la violazione di licenza. --- */

@@ -83,6 +83,49 @@ data class TextLayerConfig(
     }
 }
 
+/** Stile separato per ore e minuti (facoltativo, solo modalita' "time"): colore
+ *  e grassetto indipendenti, e possibilita' di mettere l'uno sopra e l'altro
+ *  sotto il soggetto ritagliato. Il resto (font, dimensione, contorno, alone,
+ *  ombra, posizione) resta condiviso dallo style base dell'orologio. Ore e
+ *  minuti condividono sempre la stessa posizione (layer) e la stessa
+ *  posizione/rotazione sullo schermo: formano un unico blocco che si
+ *  trascina e si posiziona solo insieme, mai singolarmente. "arrangement"
+ *  sceglie la disposizione RECIPROCA di ore e minuti dentro quel blocco:
+ *  "horizontal" = ore a sinistra, minuti a destra (comportamento di sempre);
+ *  "vertical" = ore sopra, minuti sotto. */
+data class ClockSplitConfig(
+    val enabled: Boolean,
+    val hourColor: String,
+    val hourBold: Boolean,
+    val minuteColor: String,
+    val minuteBold: Boolean,
+    val layer: String,      // "back" (sotto al soggetto) | "front" (sopra), condiviso da ore e minuti
+    val arrangement: String // "horizontal" | "vertical", condiviso da ore e minuti
+) {
+    companion object {
+        fun fromJson(o: JSONObject?, defBold: Boolean): ClockSplitConfig {
+            val j = o ?: JSONObject()
+            return ClockSplitConfig(
+                enabled = j.optBoolean("enabled", false),
+                hourColor = j.optString("hourColor", "#ffffff"),
+                hourBold = j.optBoolean("hourBold", defBold),
+                minuteColor = j.optString("minuteColor", "#ffffff"),
+                minuteBold = j.optBoolean("minuteBold", defBold),
+                layer = j.optString("layer", "back"),
+                arrangement = j.optString("arrangement", "horizontal")
+            )
+        }
+
+        fun default(bold: Boolean) = ClockSplitConfig(
+            enabled = false,
+            hourColor = "#ffffff", hourBold = bold,
+            minuteColor = "#ffffff", minuteBold = bold,
+            layer = "back",
+            arrangement = "horizontal"
+        )
+    }
+}
+
 /** Livello 1a: orologio. */
 data class ClockConfig(
     val enabled: Boolean,
@@ -93,7 +136,8 @@ data class ClockConfig(
      * disegnati come forme separate e non come glifo del font: i due gruppi
      * di cifre si distanziano automaticamente per lasciargli spazio. */
     val centerDots: Boolean = false,
-    val style: TextLayerConfig
+    val style: TextLayerConfig,
+    val splitStyle: ClockSplitConfig? = null
 )
 
 /** Livello 1b: data (indipendente dall'orologio). */
@@ -124,7 +168,8 @@ data class WallpaperConfig(
             clock = ClockConfig(
                 enabled = true, mode = "time", customText = "", format = "24",
                 centerDots = false,
-                style = TextLayerConfig.default(150f, 0.30f, true)
+                style = TextLayerConfig.default(150f, 0.30f, true),
+                splitStyle = ClockSplitConfig.default(true)
             ),
             date = DateConfig(
                 enabled = true, format = "full", uppercase = false,
@@ -147,7 +192,8 @@ data class WallpaperConfig(
                     customText = c.optString("customText", ""),
                     format = c.optString("format", "24"),
                     centerDots = c.optBoolean("centerDots", false),
-                    style = TextLayerConfig.fromJson(c.optJSONObject("style"), 150f, 0.30f, true)
+                    style = TextLayerConfig.fromJson(c.optJSONObject("style"), 150f, 0.30f, true),
+                    splitStyle = ClockSplitConfig.fromJson(c.optJSONObject("splitStyle"), true)
                 )
 
                 val d = root.optJSONObject("date") ?: JSONObject()

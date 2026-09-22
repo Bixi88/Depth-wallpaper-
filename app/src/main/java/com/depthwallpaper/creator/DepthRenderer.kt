@@ -64,12 +64,7 @@ object DepthRenderer {
         }
 
         if (config.clock.enabled) {
-            drawTextLayer(
-                canvas, w, h, k, config.clock.style,
-                clockText(config.clock),
-                multiline = config.clock.mode == "custom",
-                dotsForColon = config.clock.centerDots
-            )
+            drawClockLayer(canvas, w, h, k, config.clock, pass = "back")
         }
 
         if (config.date.enabled) {
@@ -86,6 +81,91 @@ object DepthRenderer {
                 if (link) config.bgRotation else 0f
             )
         }
+
+        if (config.clock.enabled) {
+            drawClockLayer(canvas, w, h, k, config.clock, pass = "front")
+        }
+    }
+
+    /**
+     * Disegna l'orologio. Se non e' impostato uno stile separato per ore/minuti
+     * (o l'orologio e' in modalita' "testo personalizzato", dove il concetto di
+     * ore/minuti non esiste), il comportamento e' quello di sempre: un unico
+     * livello, disegnato nel passaggio "back" (sotto al soggetto ritagliato).
+     *
+     * Con lo stile separato attivo, ore e minuti diventano due disegni
+     * indipendenti (stesso font/dimensione/tracking/contorno/alone/ombra, presi
+     * dallo stile base, ma colore e grassetto propri): condividono pero'
+     * sempre lo stesso passaggio ("back" o "front", da split.layer) e sempre la
+     * stessa posizione/rotazione (x/y/rotation dello style base), quindi
+     * viaggiano sempre insieme rispetto al soggetto ritagliato e non possono
+     * essere trascinati o posizionati singolarmente. split.arrangement sceglie
+     * solo la disposizione RECIPROCA: "horizontal" (default) affianca ore e
+     * minuti sulla stessa riga; "vertical" mette le ore sulla riga sopra e i
+     * minuti su quella sotto, senza i due punti centrali (non necessari: le
+     * due righe sono gia' visivamente separate).
+     */
+    private fun drawClockLayer(canvas: Canvas, w: Float, h: Float, k: Float, clock: ClockConfig, pass: String) {
+        val text = clockText(clock)
+        val split = clock.splitStyle
+        if (split == null || !split.enabled || clock.mode == "custom") {
+            if (pass == "back") {
+                drawTextLayer(canvas, w, h, k, clock.style, text, multiline = clock.mode == "custom", dotsForColon = clock.centerDots)
+            }
+            return
+        }
+        if (split.layer != pass) return
+
+        // Sottostringa "ore" isolata con un pattern dedicato (serve solo a
+        // misurarne la larghezza esatta): H/h possono avere 1 o 2 cifre a
+        // seconda dell'ora corrente, mentre HH ne ha sempre 2.
+        val hourPattern = when (clock.format) {
+            "24short" -> "H"
+            "12", "12ampm" -> "h"
+            else -> "HH"
+        }
+        val hourPart = try {
+            SimpleDateFormat(hourPattern, Locale.getDefault()).format(Date())
+        } catch (e: Exception) {
+            ""
+        }
+
+        if (split.arrangement == "vertical") {
+            // Ore sopra, minuti sotto: due righe fisse (niente ":" ne' a-capo
+            // automatico), sempre disegnate come un unico blocco che si trascina
+            // e si posiziona solo insieme (vedi drawTextLayer/stackedLines sopra).
+            val minutePattern = if (clock.format == "12ampm") "mm a" else "mm"
+            val minutePart = try {
+                SimpleDateFormat(minutePattern, Locale.getDefault()).format(Date())
+            } catch (e: Exception) {
+                ""
+            }
+            val stackedLines = listOf(hourPart, minutePart)
+            drawTextLayer(
+                canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = false,
+                splitSide = "top",
+                colorOverride = split.hourColor, boldOverride = split.hourBold,
+                stackedLines = stackedLines
+            )
+            drawTextLayer(
+                canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = false,
+                splitSide = "bottom",
+                colorOverride = split.minuteColor, boldOverride = split.minuteBold,
+                stackedLines = stackedLines
+            )
+            return
+        }
+
+        drawTextLayer(
+            canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = clock.centerDots,
+            splitAt = hourPart, splitSide = "before",
+            colorOverride = split.hourColor, boldOverride = split.hourBold
+        )
+        drawTextLayer(
+            canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = clock.centerDots,
+            splitAt = hourPart, splitSide = "after",
+            colorOverride = split.minuteColor, boldOverride = split.minuteBold
+        )
     }
 
     // -------------------------------------------------------------------------------
@@ -146,6 +226,8 @@ object DepthRenderer {
         "tightenCaps" to Pair("fonts/TightenCaps-ExtraLight.otf", null),
         "skyscraper" to Pair("fonts/Skyscraper-Condensed.ttf", null),
         "sensationalSans" to Pair("fonts/SensationalSans-Light.ttf", null),
+        "klorhine" to Pair("fonts/Klorhine-Regular.otf", null),
+        "raptors" to Pair("fonts/Raptors.otf", null),
         // ATTENZIONE: file demo (uso personale) - vedi nota di licenza in style.css.
         "calcio" to Pair("fonts/Calcio-Demo.ttf", null)
     )
@@ -221,7 +303,28 @@ object DepthRenderer {
         style: TextLayerConfig,
         text: String,
         multiline: Boolean,
-        dotsForColon: Boolean = false
+        dotsForColon: Boolean = false,
+        // --- stile separato ore/minuti (solo orologio, vedi drawClockLayer) ---
+        // splitAt: la sottostringa "ore" isolata, usata solo per misurare dove
+        // cade il confine tra ore e minuti nel testo completo gia' composto.
+        // splitSide: "before" disegna (con clip) solo la parte fino al confine
+        // (le ore), "after" solo quella dopo (i minuti). null = nessun taglio,
+        // comportamento di sempre.
+        splitAt: String? = null,
+        splitSide: String? = null,
+        colorOverride: String? = null,
+        boldOverride: Boolean? = null,
+        // stackedLines: usato solo dalla disposizione verticale dello stile
+        // separato ore/minuti (vedi drawClockLayer). Quando presente e' una
+        // lista di ESATTAMENTE due righe fisse, ore e minuti: sostituisce il
+        // normale calcolo delle righe (niente a-capo automatico) e va usato
+        // insieme a splitSide "top"/"bottom" per isolare, con un ritaglio
+        // verticale, solo la riga di competenza di questa chiamata. Le due
+        // chiamate (ore/minuti) misurano comunque ENTRAMBE le righe per restare
+        // centrate come un unico blocco, esattamente come gia' avviene per la
+        // disposizione orizzontale (splitAt/"before"/"after"): ore e minuti
+        // restano cosi' sempre un solo riquadro, spostabile solo insieme.
+        stackedLines: List<String>? = null
     ) {
         if (text.isEmpty()) return
         var sizePx = style.size * k
@@ -231,9 +334,11 @@ object DepthRenderer {
         val sx = if (style.stretchX <= 0f) 1f else style.stretchX
         val sy = if (style.stretchY <= 0f) 1f else style.stretchY
         val alpha = style.opacity.coerceIn(0f, 1f)
+        val effectiveBold = boldOverride ?: style.bold
+        val effectiveColor = colorOverride ?: style.color
 
         val base = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
-        base.typeface = typefaceFor(style.fontKey, style.bold, style.italic)
+        base.typeface = typefaceFor(style.fontKey, effectiveBold, style.italic)
         base.textSize = sizePx
 
         // Adattamento automatico su una riga (specchio della stessa logica nell'editor
@@ -242,7 +347,7 @@ object DepthRenderer {
         // testo naturale sfora il canvas lo restringiamo qui in proporzione, cosi' il
         // risultato reale sul dispositivo resta coerente con l'anteprima dell'editor.
         var effK = k
-        if (!multiline) {
+        if (!multiline && stackedLines == null) {
             val naturalW = measureTracked(base, text, tracking, dotsForColon) * sx
             val maxAllowed = w * 0.94f
             if (naturalW > maxAllowed && naturalW > 0f) {
@@ -254,10 +359,10 @@ object DepthRenderer {
             }
         }
 
-        val lines: List<String> = if (multiline) {
-            wrapLines(base, text, (w * 0.92f) / sx, tracking, dotsForColon)
-        } else {
-            listOf(text)
+        val lines: List<String> = when {
+            stackedLines != null -> stackedLines
+            multiline -> wrapLines(base, text, (w * 0.92f) / sx, tracking, dotsForColon)
+            else -> listOf(text)
         }
         val lineHeight = sizePx * 1.12f
         val firstY = -(lines.size - 1) * lineHeight / 2f
@@ -273,6 +378,36 @@ object DepthRenderer {
         // gradiente del riempimento (calcolata una sola volta).
         var maxLineWidth = 0f
         for (line in lines) maxLineWidth = maxOf(maxLineWidth, measureTracked(base, line, tracking, dotsForColon))
+
+        if (stackedLines != null && splitSide != null) {
+            // Ritaglio verticale ore-sopra/minuti-sotto: stesso principio del
+            // ritaglio orizzontale sotto, ma isola una RIGA (indice 0 = ore, 1 =
+            // minuti) invece di una porzione di larghezza. Il blocco resta
+            // comunque centrato su entrambe le righe insieme (maxLineWidth sopra
+            // tiene conto di entrambe), quindi le due chiamate (ore/minuti)
+            // restano perfettamente allineate come un unico riquadro.
+            val idx = if (splitSide == "top") 0 else 1
+            val bandTop = firstY + (idx - 0.5f) * lineHeight
+            val bandBottom = bandTop + lineHeight
+            val bigW = maxLineWidth + sizePx * 4f + w // ampio margine: mai il fattore limitante
+            canvas.clipRect(-bigW, bandTop, bigW, bandBottom)
+        } else if (splitAt != null && splitSide != null && !multiline) {
+            // Ritaglio orizzontale ore-sinistra/minuti-destra: il testo e' centrato
+            // su x=0 in questo spazio locale, quindi il bordo sinistro cade a
+            // -maxLineWidth/2. Misurando la sola sottostringa "ore" con lo stesso
+            // paint/tracking (gia' post-adattamento automatico) si trova il
+            // confine esatto, coerente carattere per carattere con l'unico
+            // disegno che avverrebbe senza divisione.
+            val hourW = measureTracked(base, splitAt, tracking, dotsForColon)
+            val boundaryX = -maxLineWidth / 2f + hourW
+            val top = firstY - lineHeight
+            val bottom = firstY + (lines.size) * lineHeight
+            if (splitSide == "before") {
+                canvas.clipRect(-maxLineWidth, top, boundaryX, bottom)
+            } else {
+                canvas.clipRect(boundaryX, top, maxLineWidth, bottom)
+            }
+        }
 
         // --- pannello dietro al testo ---
         if (style.plateOpacity > 0f) {
@@ -349,14 +484,14 @@ object DepthRenderer {
         }
         val fill = Paint(base)
         fill.style = Paint.Style.FILL
-        fill.color = parseColor(style.color, Color.WHITE)
+        fill.color = parseColor(effectiveColor, Color.WHITE)
         fill.alpha = (alpha * 255).toInt()
         if (style.gradient && maxLineWidth > 0f) {
             val dir = style.gradientDirection
             if (dir == "vertical" || dir == "fadeDown") {
                 val top = firstY - lineHeight / 2f
                 val bottom = firstY + (lines.size - 1) * lineHeight + lineHeight / 2f
-                val startColor = parseColor(style.color, Color.WHITE)
+                val startColor = parseColor(effectiveColor, Color.WHITE)
                 if (dir == "fadeDown") {
                     // "fadeDown": la trasparenza cresce dall'alto verso il basso.
                     // gradientFadeOpacity (0..1) e' la quantita' di trasparenza voluta:
@@ -397,7 +532,7 @@ object DepthRenderer {
                 val half = maxLineWidth / 2f
                 fill.shader = LinearGradient(
                     -half, 0f, half, 0f,
-                    parseColor(style.color, Color.WHITE),
+                    parseColor(effectiveColor, Color.WHITE),
                     parseColor(style.color2, Color.WHITE),
                     Shader.TileMode.CLAMP
                 )

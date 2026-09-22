@@ -157,11 +157,60 @@
             </select>
           </div>
 
-          <div class="field-group">
+          <div class="field-group" id="clockCenterDotsGroup">
             <label class="checkbox-row">
               <input type="checkbox" id="clockCenterDotsCheck" />
               <span>Puntini centrali</span>
             </label>
+          </div>
+
+          <div class="field-group section-title">Stile separato ore/minuti</div>
+          <div class="field-group">
+            <label class="checkbox-row">
+              <input type="checkbox" id="clockSplitEnabledCheck" />
+              <span>Colore/grassetto/posizione separati per ore e minuti</span>
+            </label>
+            <p class="hint-text">Font, dimensione, contorno e alone restano quelli impostati sopra: qui si sceglie solo colore, grassetto, disposizione e se stare sopra o sotto il soggetto ritagliato, per le ore e per i minuti separatamente.</p>
+          </div>
+          <div class="field-group hidden" id="clockSplitGroup">
+            <div class="field-group">
+              <label for="clockSplitArrangementSelect">Disposizione</label>
+              <select id="clockSplitArrangementSelect">
+                <option value="horizontal">Orizzontale &middot; ore a sinistra, minuti a destra</option>
+                <option value="vertical">Verticale &middot; ore sopra, minuti sotto</option>
+              </select>
+              <p class="hint-text">Ore e minuti restano sempre un unico blocco: si trascinano, ruotano e posizionano solo insieme, mai separatamente. Con la disposizione verticale i puntini centrali non sono disponibili, perche' le due righe li rendono superflui.</p>
+            </div>
+            <div class="field-group">
+              <label for="clockSplitLayerSelect">Posizione rispetto al soggetto (condivisa da ore e minuti)</label>
+              <select id="clockSplitLayerSelect">
+                <option value="back">Sotto il soggetto</option>
+                <option value="front">Sopra il soggetto</option>
+              </select>
+            </div>
+
+            <div class="field-group section-title">Ore</div>
+            <div class="field-group">
+              <label>Colore ore</label>
+              <div class="color-row">
+                <button type="button" class="color-swatch-btn" id="clockHourColorPicker" data-value="#ffffff"></button>
+              </div>
+            </div>
+            <div class="field-group">
+              <label class="checkbox-row"><input type="checkbox" id="clockHourBoldCheck" checked /><span>Grassetto ore</span></label>
+            </div>
+
+            <div class="field-group section-title">Minuti</div>
+            <div class="field-group">
+              <label>Colore minuti</label>
+              <div class="color-row">
+                <button type="button" class="color-swatch-btn" id="clockMinuteColorPicker" data-value="#ffffff"></button>
+              </div>
+            </div>
+            <div class="field-group">
+              <label class="checkbox-row"><input type="checkbox" id="clockMinuteBoldCheck" checked /><span>Grassetto minuti</span></label>
+              <p class="hint-text">I due punti centrali (se attivi) seguono la stessa posizione di ore e minuti.</p>
+            </div>
           </div>
 
           <div class="field-group section-title">Posizione</div>
@@ -244,18 +293,6 @@
           <div class="field-group">
             <label>Colore alone</label>
             <button type="button" class="color-swatch-btn" id="clockGlowColor" data-value="#000000"></button>
-          </div>
-          <div class="field-group">
-            <label>Ombra &middot; intensit&agrave; <span class="value-badge" id="clockShadowValue">45%</span></label>
-            <input type="range" id="clockShadowRange" min="0" max="100" value="45" data-center="45" />
-          </div>
-          <div class="field-group">
-            <label>Ombra &middot; sfocatura <span class="value-badge" id="clockShadowBlurValue">10</span></label>
-            <input type="range" id="clockShadowBlurRange" min="0" max="40" value="10" data-center="10" />
-          </div>
-          <div class="field-group">
-            <label>Ombra &middot; distanza <span class="value-badge" id="clockShadowOffValue">4</span></label>
-            <input type="range" id="clockShadowOffRange" min="-20" max="40" value="4" data-center="4" />
           </div>
 
           <div class="field-group">
@@ -373,18 +410,6 @@
           <div class="field-group">
             <label>Colore alone</label>
             <button type="button" class="color-swatch-btn" id="dateGlowColor" data-value="#000000"></button>
-          </div>
-          <div class="field-group">
-            <label>Ombra &middot; intensit&agrave; <span class="value-badge" id="dateShadowValue">45%</span></label>
-            <input type="range" id="dateShadowRange" min="0" max="100" value="45" data-center="45" />
-          </div>
-          <div class="field-group">
-            <label>Ombra &middot; sfocatura <span class="value-badge" id="dateShadowBlurValue">10</span></label>
-            <input type="range" id="dateShadowBlurRange" min="0" max="40" value="10" data-center="10" />
-          </div>
-          <div class="field-group">
-            <label>Ombra &middot; distanza <span class="value-badge" id="dateShadowOffValue">4</span></label>
-            <input type="range" id="dateShadowOffRange" min="-20" max="40" value="4" data-center="4" />
           </div>
 
           <div class="field-group">

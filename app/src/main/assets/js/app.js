@@ -32,6 +32,8 @@
     { key: "tightenCaps", label: "Tighten Caps", css: "'Tighten Caps', sans-serif", bundled: true },
     { key: "skyscraper", label: "Skyscraper Condensed", css: "'Skyscraper Condensed', sans-serif", bundled: true },
     { key: "sensationalSans", label: "Sensational Sans", css: "'Sensational Sans', sans-serif", bundled: true },
+    { key: "klorhine", label: "Klorhine", css: "'Klorhine', sans-serif", bundled: true },
+    { key: "raptors", label: "Raptors", css: "'Raptors', sans-serif", bundled: true },
     // ATTENZIONE: file demo (uso personale) - vedi nota di licenza in style.css.
     { key: "calcio", label: "Calcio", css: "'Calcio', sans-serif", bundled: true },
   ];
@@ -105,13 +107,37 @@
     };
   }
 
+  /** Stile separato ore/minuti (facoltativo, solo orologio in modalita' "ora"):
+   *  vedi ClockSplitConfig in WallpaperConfig.kt. Ore e minuti condividono
+   *  sempre lo stesso "layer" (non possono stare uno sopra e l'altro sotto al
+   *  soggetto) e sempre la stessa posizione/rotazione: sono un unico blocco
+   *  che si trascina e si posiziona solo insieme, mai singolarmente.
+   *  "arrangement" sceglie invece la disposizione RECIPROCA di ore e minuti
+   *  all'interno di quel blocco: "horizontal" = ore a sinistra, minuti a
+   *  destra (comportamento di sempre); "vertical" = ore sopra, minuti sotto. */
+  function defaultClockSplit(bold) {
+    return {
+      enabled: false,
+      hourColor: "#ffffff",
+      hourBold: !!bold,
+      minuteColor: "#ffffff",
+      minuteBold: !!bold,
+      layer: "back", // "back" (sotto al soggetto) | "front" (sopra)
+      arrangement: "horizontal", // "horizontal" | "vertical"
+    };
+  }
+
   const state = {
     bg: { img: null, dataUrl: null, scale: 1, offX: 0, offY: 0, rotation: 0 },
     fg: { img: null, dataUrl: null, scale: 1, offX: 0, offY: 0 },
     photoDataUrl: null,
     bgDim: 0,
     linkFgToBg: false,
-    clock: { enabled: true, mode: "time", customText: "", format: "24", centerDots: false, style: defaultStyle(150, 0.30, true) },
+    clock: {
+      enabled: true, mode: "time", customText: "", format: "24", centerDots: false,
+      style: defaultStyle(150, 0.30, true),
+      splitStyle: defaultClockSplit(true),
+    },
     date: { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.38, false) },
   };
 
@@ -167,6 +193,34 @@
       case "12": return h12 + sep + pad2(m);
       case "12ampm": return h12 + sep + pad2(m) + (h < 12 ? " AM" : " PM");
       default: return pad2(h) + sep + pad2(m);
+    }
+  }
+
+  /** Isola la sola sottostringa "ore" (per il confine ore/minuti dello stile
+   *  separato): stessa logica di clockString() sopra, specchio di
+   *  drawClockLayer in DepthRenderer.kt. */
+  function clockHourPart(format) {
+    const now = new Date();
+    const h = now.getHours();
+    const h12 = h % 12 === 0 ? 12 : h % 12;
+    switch (format) {
+      case "24short": return String(h);
+      case "12":
+      case "12ampm": return String(h12);
+      default: return pad2(h);
+    }
+  }
+
+  /** Isola la sola sottostringa "minuti" (per la disposizione verticale dello
+   *  stile separato): specchio di clockHourPart() sopra e di
+   *  drawClockLayer in DepthRenderer.kt. */
+  function clockMinutePart(format) {
+    const now = new Date();
+    const h = now.getHours();
+    const m = now.getMinutes();
+    switch (format) {
+      case "12ampm": return pad2(m) + (h < 12 ? " AM" : " PM");
+      default: return pad2(m);
     }
   }
 
@@ -364,8 +418,17 @@
     if (fadeBottom < 1) grad.addColorStop(1, hexToRgba(color, 0));
   }
 
-  /** Disegna un livello di testo e restituisce il riquadro occupato (frazioni 0..1). */
-  function drawTextLayer(context, w, h, style, text, multiline, dotsForColon) {
+  /** Disegna un livello di testo e restituisce il riquadro occupato (frazioni 0..1).
+   *  stackedLines: usato solo dalla disposizione verticale dello stile separato
+   *  ore/minuti (vedi drawClockLayer). Quando presente e' un array di ESATTAMENTE
+   *  due righe fisse, "ore" e "minuti": sostituisce il normale calcolo delle righe
+   *  (niente a-capo automatico) e va sempre usato insieme a splitSide "top"/"bottom"
+   *  per isolare, con un ritaglio verticale, solo la riga di competenza di questa
+   *  chiamata. Le due chiamate (ore/minuti) misurano comunque ENTRAMBE le righe per
+   *  restare centrate come un unico blocco, esattamente come gia' avviene per la
+   *  disposizione orizzontale (splitAt/"before"/"after"): ore e minuti restano
+   *  cosi' sempre un solo riquadro, che si trascina e si posiziona solo insieme. */
+  function drawTextLayer(context, w, h, style, text, multiline, dotsForColon, splitAt, splitSide, colorOverride, boldOverride, stackedLines) {
     if (!text) return null;
     const k = w / CANVAS_W;
     let size = style.size * k;
@@ -375,13 +438,15 @@
     const sy = style.stretchY > 0 ? style.stretchY : 1;
     let tracking = style.tracking * k;
     const alpha = Math.max(0, Math.min(1, style.opacity));
+    const effectiveBold = boldOverride != null ? boldOverride : style.bold;
+    const effectiveColor = colorOverride || style.color;
 
     context.save();
     context.globalAlpha = alpha;
     context.textBaseline = "middle";
     context.lineJoin = "round";
     context.lineCap = "round";
-    const weight = style.bold ? "700" : "400";
+    const weight = effectiveBold ? "700" : "400";
     const italic = style.italic ? "italic " : "";
     context.font = `${italic}${weight} ${size}px ${fontCss(style.fontKey)}`;
 
@@ -392,7 +457,7 @@
     // e il risultato reale sul dispositivo restano sempre coerenti, qualunque sia
     // il font scelto.
     let effK = k;
-    if (!multiline) {
+    if (!multiline && !stackedLines) {
       const naturalW = measureTracked(context, String(text), tracking, dotsForColon) * sx;
       const maxAllowed = w * 0.94;
       if (naturalW > maxAllowed && naturalW > 0) {
@@ -408,12 +473,45 @@
     if (style.rotation) context.rotate((style.rotation * Math.PI) / 180);
     context.scale(sx, sy);
 
-    const lines = multiline ? wrapLines(context, text, (w * 0.92) / sx, tracking, dotsForColon) : [String(text)];
+    const lines = stackedLines ? stackedLines.slice() : (multiline ? wrapLines(context, text, (w * 0.92) / sx, tracking, dotsForColon) : [String(text)]);
     const lineHeight = size * 1.12;
     const firstY = (-(lines.length - 1) * lineHeight) / 2;
 
     let maxW = 0;
     for (const line of lines) maxW = Math.max(maxW, measureTracked(context, line, tracking, dotsForColon));
+
+    if (stackedLines && splitSide) {
+      // Ritaglio verticale ore-sopra/minuti-sotto: stesso principio del ritaglio
+      // orizzontale sotto, ma isola una RIGA (indice 0 = ore, 1 = minuti) invece
+      // di una porzione di larghezza. Il blocco resta comunque centrato su
+      // entrambe le righe insieme (maxW sopra tiene conto di entrambe), quindi
+      // le due chiamate (ore/minuti) restano perfettamente allineate come un
+      // unico riquadro. Specchio esatto di DepthRenderer.kt.
+      const idx = splitSide === "top" ? 0 : 1;
+      const bandTop = firstY + (idx - 0.5) * lineHeight;
+      const bandBottom = bandTop + lineHeight;
+      const bigW = maxW + size * 4 + w; // ampio margine: mai il fattore limitante
+      context.beginPath();
+      context.rect(-bigW, bandTop, bigW * 2, bandBottom - bandTop);
+      context.clip();
+    } else if (splitAt != null && splitSide && !multiline) {
+      // Ritaglio orizzontale ore-sinistra/minuti-destra: specchio esatto di
+      // DepthRenderer.kt. Il testo e' centrato su x=0 in questo spazio locale;
+      // misurando la sola sottostringa "ore" con lo stesso font/tracking (gia'
+      // post-adattamento automatico) si trova il confine esatto, coerente con
+      // l'unico disegno che avverrebbe senza divisione.
+      const hourW = measureTracked(context, splitAt, tracking, dotsForColon);
+      const boundaryX = -maxW / 2 + hourW;
+      const top = firstY - lineHeight;
+      const bottom = firstY + lines.length * lineHeight;
+      context.beginPath();
+      if (splitSide === "before") {
+        context.rect(-maxW, top, boundaryX - -maxW, bottom - top);
+      } else {
+        context.rect(boundaryX, top, maxW - boundaryX, bottom - top);
+      }
+      context.clip();
+    }
 
     let shadowPending = style.shadowOpacity > 0;
     function applyShadowIfPending() {
@@ -472,20 +570,20 @@
         const bottom = firstY + (lines.length - 1) * lineHeight + lineHeight / 2;
         const grad = context.createLinearGradient(0, top, 0, bottom);
         if (dir === "fadeDown") {
-          addFadeDownStops(grad, style.color, style.gradientFadeOpacity || 0);
+          addFadeDownStops(grad, effectiveColor, style.gradientFadeOpacity || 0);
         } else {
-          grad.addColorStop(0, style.color);
+          grad.addColorStop(0, effectiveColor);
           grad.addColorStop(1, style.color2);
         }
         context.fillStyle = grad;
       } else {
         const grad = context.createLinearGradient(-maxW / 2, 0, maxW / 2, 0);
-        grad.addColorStop(0, style.color);
+        grad.addColorStop(0, effectiveColor);
         grad.addColorStop(1, style.color2);
         context.fillStyle = grad;
       }
     } else {
-      context.fillStyle = style.color;
+      context.fillStyle = effectiveColor;
     }
     drawLines(context, lines, firstY, lineHeight, tracking, "fill", dotsForColon);
 
@@ -501,6 +599,53 @@
       return { x: style.x, y: style.y, halfW: r, halfH: (r * w) / h };
     }
     return { x: style.x, y: style.y, halfW: halfW, halfH: halfH };
+  }
+
+  /** Specchio di drawClockLayer in DepthRenderer.kt: vedi li' per i dettagli.
+   *  Ritorna il riquadro dell'orologio (per il trascinamento sull'anteprima)
+   *  solo quando disegna nel passaggio "back", cosi' l'hit-test in render()
+   *  resta invariato rispetto a prima (un solo riquadro, non due). */
+  function drawClockLayer(context, w, h, clock, pass) {
+    const text = clockString();
+    if (!text) return null;
+    const multiline = clock.mode === "custom";
+    const split = clock.splitStyle;
+    if (!split || !split.enabled || clock.mode === "custom") {
+      if (pass === "back") {
+        return drawTextLayer(context, w, h, clock.style, text, multiline, clock.centerDots);
+      }
+      return null;
+    }
+    if (split.layer !== pass) return null;
+
+    if (split.arrangement === "vertical") {
+      // Ore sopra, minuti sotto: due righe fisse (niente ":" ne' a-capo
+      // automatico), sempre disegnate come un unico blocco che si trascina e
+      // si posiziona solo insieme (vedi drawTextLayer/stackedLines sopra).
+      const hourPart = clockHourPart(clock.format);
+      const minutePart = clockMinutePart(clock.format);
+      const stackedLines = [hourPart, minutePart];
+      const box = drawTextLayer(
+        context, w, h, clock.style, text, false, false,
+        null, "top", split.hourColor, split.hourBold, stackedLines
+      );
+      drawTextLayer(
+        context, w, h, clock.style, text, false, false,
+        null, "bottom", split.minuteColor, split.minuteBold, stackedLines
+      );
+      return box;
+    }
+
+    const hourPart = clockHourPart(clock.format);
+    const box = drawTextLayer(
+      context, w, h, clock.style, text, false, clock.centerDots,
+      hourPart, "before", split.hourColor, split.hourBold
+    );
+    drawTextLayer(
+      context, w, h, clock.style, text, false, clock.centerDots,
+      hourPart, "after", split.minuteColor, split.minuteBold
+    );
+    return box;
   }
 
   // ===========================================================================
@@ -521,7 +666,7 @@
     }
 
     const clockBox = state.clock.enabled
-      ? drawTextLayer(context, w, h, state.clock.style, clockString(), state.clock.mode === "custom", state.clock.centerDots)
+      ? drawClockLayer(context, w, h, state.clock, "back")
       : null;
 
     const dateBox = state.date.enabled
@@ -537,6 +682,10 @@
         link ? state.bg.offY + state.fg.offY : state.fg.offY,
         link ? state.bg.rotation : 0
       );
+    }
+
+    if (state.clock.enabled) {
+      drawClockLayer(context, w, h, state.clock, "front");
     }
 
     return { clockBox, dateBox };
@@ -730,18 +879,47 @@
       `linear-gradient(to right, var(--bg-3) 0%, var(--bg-3) ${lo}%, var(--accent) ${lo}%, var(--accent) ${hi}%, var(--bg-3) ${hi}%, var(--bg-3) 100%)`;
   }
 
+  let previewRenderScheduled = false;
+  /** Ridisegnare l'intera anteprima (foto + livelli + testo) e' il lavoro
+   *  costoso di ogni frame; farlo ad ogni singolo campione di trascinamento
+   *  (touchmove puo' arrivare a 60-120 volte al secondo) satura il thread JS,
+   *  e il browser inizia a raggruppare/scartare gli eventi touch in arrivo:
+   *  il risultato visibile e' uno slider che "salta" a scatti invece di
+   *  seguire il dito con continuita'. Qui si raggruppa il ridisegno a un
+   *  massimo di una volta per frame (via requestAnimationFrame), mentre
+   *  l'aggiornamento visivo dello slider stesso (pallino + valore, gia'
+   *  economico) resta sempre immediato e sincrono: e' quello che da' la
+   *  sensazione di fluidita' durante il trascinamento.
+   */
+  function schedulePreviewRender() {
+    if (previewRenderScheduled) return;
+    previewRenderScheduled = true;
+    requestAnimationFrame(() => {
+      previewRenderScheduled = false;
+      renderPreview();
+    });
+  }
+
   function applySlider(s, rawValue, doRender) {
-    const v = Math.round(Math.max(s.min, Math.min(s.max, rawValue)));
+    // NIENTE arrotondamento qui: il valore resta continuo (frazionario) per la
+    // posizione del cursore e per l'effetto applicato. Prima si arrotondava
+    // subito a un intero, quindi il cursore nativo si spostava SOLO quando il
+    // valore intero cambiava - risultato: da fermo, poi un salto secco di
+    // "passo" pixel (es. 3px per l'1%), invece di seguire il dito con
+    // continuita'. Ora il cursore segue il dito pixel per pixel; solo il
+    // numero mostrato nel badge viene arrotondato, per restare leggibile.
+    const v = Math.max(s.min, Math.min(s.max, rawValue));
     s.input.value = v;
     if (s.setter) s.setter(v);
-    if (s.badge) s.badge.textContent = s.formatter ? s.formatter(v) : String(v);
+    const rounded = Math.round(v);
+    if (s.badge) s.badge.textContent = s.formatter ? s.formatter(rounded) : String(rounded);
     paintSliderFill(s, v);
     // Con l'editor di ritaglio aperto l'anteprima principale e' nascosta sotto al
     // modal: ridisegnarla ad ogni campione di trascinamento (oltre al gia' costoso
     // ridisegno del setter dello slider stesso) raddoppiava il lavoro sul thread JS.
     // Durante il trascinamento di "Contorno ritaglio"/"Bordo bianco adesivo" questo
     // bastava a saturare il thread e bloccare l'intera WebView (persino "Applica").
-    if (doRender && (!cutoutModal || cutoutModal.classList.contains("hidden"))) renderPreview();
+    if (doRender && (!cutoutModal || cutoutModal.classList.contains("hidden"))) schedulePreviewRender();
   }
 
   function setSlider(rangeId, value) {
@@ -835,7 +1013,10 @@
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
-        applySlider(s, Number(s.input.value) + delta, true);
+        // Riparte sempre dal valore intero (mai da un eventuale residuo
+        // frazionario lasciato da un trascinamento), cosi' i tasti +/- restano
+        // sempre un passo pulito di 1 unita'.
+        applySlider(s, Math.round(Number(s.input.value)) + delta, true);
       });
       return btn;
     }
@@ -2134,9 +2315,6 @@
     bindColor(prefix + "OutlineColor", (v) => { st().outlineColor = v; });
     bindRange(prefix + "GlowRange", prefix + "GlowValue", (v) => { st().glowWidth = v; });
     bindColor(prefix + "GlowColor", (v) => { st().glowColor = v; });
-    bindRange(prefix + "ShadowRange", prefix + "ShadowValue", (v) => { st().shadowOpacity = v / 100; }, (v) => v + "%");
-    bindRange(prefix + "ShadowBlurRange", prefix + "ShadowBlurValue", (v) => { st().shadowBlur = v; });
-    bindRange(prefix + "ShadowOffRange", prefix + "ShadowOffValue", (v) => { st().shadowOffsetY = v; });
     bindRange(prefix + "PlateRange", prefix + "PlateValue", (v) => { st().plateOpacity = v / 100; }, (v) => v + "%");
     bindColor(prefix + "PlateColor", (v) => { st().plateColor = v; });
 
@@ -2173,9 +2351,6 @@
     setSlider(prefix + "OpacityRange", Math.round(s.opacity * 100));
     setSlider(prefix + "OutlineRange", s.outlineWidth);
     setSlider(prefix + "GlowRange", s.glowWidth);
-    setSlider(prefix + "ShadowRange", Math.round(s.shadowOpacity * 100));
-    setSlider(prefix + "ShadowBlurRange", s.shadowBlur);
-    setSlider(prefix + "ShadowOffRange", s.shadowOffsetY);
     setSlider(prefix + "PlateRange", Math.round(s.plateOpacity * 100));
     setSlider(prefix + "XRange", Math.round(s.x * 100));
     setSlider(prefix + "YRange", Math.round(s.y * 100));
@@ -2202,9 +2377,56 @@
   bindSelect("clockFormatSelect", (v) => { state.clock.format = v; });
   bindCheck("clockCenterDotsCheck", (v) => { state.clock.centerDots = v; });
 
+  // --- Stile separato ore/minuti ---
+  const clockSplitGroup = document.getElementById("clockSplitGroup");
+  const clockCenterDotsGroup = document.getElementById("clockCenterDotsGroup");
+  const clockCenterDotsCheck = document.getElementById("clockCenterDotsCheck");
+  // I puntini centrali (":") hanno senso solo quando ore e minuti stanno sulla
+  // stessa riga (disposizione orizzontale, o stile separato non attivo): con
+  // la disposizione verticale ogni riga e' gia' visivamente separata dall'altra,
+  // quindi il controllo va nascosto e l'opzione forzata a spenta.
+  function isVerticalSplitActive() {
+    const sp = state.clock.splitStyle;
+    return !!sp.enabled && sp.arrangement === "vertical";
+  }
+  function syncClockSplitUi() {
+    const sp = state.clock.splitStyle;
+    document.getElementById("clockSplitEnabledCheck").checked = !!sp.enabled;
+    clockSplitGroup.classList.toggle("hidden", !sp.enabled);
+    document.getElementById("clockSplitArrangementSelect").value = sp.arrangement || "horizontal";
+    document.getElementById("clockSplitLayerSelect").value = sp.layer || "back";
+    setColorValue(document.getElementById("clockHourColorPicker"), sp.hourColor);
+    document.getElementById("clockHourBoldCheck").checked = !!sp.hourBold;
+    setColorValue(document.getElementById("clockMinuteColorPicker"), sp.minuteColor);
+    document.getElementById("clockMinuteBoldCheck").checked = !!sp.minuteBold;
+
+    const verticalActive = isVerticalSplitActive();
+    if (verticalActive && state.clock.centerDots) {
+      state.clock.centerDots = false;
+      clockCenterDotsCheck.checked = false;
+    }
+    clockCenterDotsGroup.classList.toggle("hidden", verticalActive);
+  }
+  bindCheck("clockSplitEnabledCheck", (v) => {
+    state.clock.splitStyle.enabled = v;
+    syncClockSplitUi();
+  });
+  bindSelect("clockSplitArrangementSelect", (v) => {
+    state.clock.splitStyle.arrangement = v;
+    syncClockSplitUi();
+  });
+  bindSelect("clockSplitLayerSelect", (v) => { state.clock.splitStyle.layer = v; });
+  bindColor("clockHourColorPicker", (hex) => { state.clock.splitStyle.hourColor = hex; });
+  bindCheck("clockHourBoldCheck", (v) => { state.clock.splitStyle.hourBold = v; });
+  bindColor("clockMinuteColorPicker", (hex) => { state.clock.splitStyle.minuteColor = hex; });
+  bindCheck("clockMinuteBoldCheck", (v) => { state.clock.splitStyle.minuteBold = v; });
+  syncClockSplitUi();
+
   document.getElementById("clockResetBtn").addEventListener("click", () => {
     state.clock.style = defaultStyle(150, 0.30, true);
+    state.clock.splitStyle = defaultClockSplit(true);
     syncTextLayerUi("clock", state.clock);
+    syncClockSplitUi();
     renderPreview();
     showToast("Orologio ripristinato");
   });
@@ -2282,7 +2504,7 @@
     resetAllArmed = false;
     clearTimeout(resetAllTimer);
 
-    state.clock = { enabled: true, mode: "time", customText: "", format: "24", centerDots: false, style: defaultStyle(150, 0.30, true) };
+    state.clock = { enabled: true, mode: "time", customText: "", format: "24", centerDots: false, style: defaultStyle(150, 0.30, true), splitStyle: defaultClockSplit(true) };
     state.date = { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.38, false) };
     state.bgDim = 0;
     state.linkFgToBg = false;
@@ -2292,6 +2514,7 @@
     document.getElementById("clockEnabledCheck").checked = true;
     document.getElementById("clockFormatSelect").value = "24";
     document.getElementById("clockCenterDotsCheck").checked = false;
+    syncClockSplitUi();
     syncClockMode();
     document.getElementById("dateEnabledCheck").checked = true;
     document.getElementById("dateFormatSelect").value = "full";
@@ -2536,6 +2759,15 @@
     };
   }
 
+  function clockSplitJson(sp) {
+    return {
+      enabled: !!sp.enabled,
+      hourColor: sp.hourColor, hourBold: !!sp.hourBold,
+      minuteColor: sp.minuteColor, minuteBold: !!sp.minuteBold,
+      layer: sp.layer || "back",
+    };
+  }
+
   function buildConfig() {
     return {
       version: 3,
@@ -2546,6 +2778,7 @@
         format: state.clock.format,
         centerDots: state.clock.centerDots,
         style: styleJson(state.clock.style),
+        splitStyle: clockSplitJson(state.clock.splitStyle),
       },
       date: {
         enabled: state.date.enabled,
@@ -2599,6 +2832,7 @@
         state.clock.centerDots = !!cfg.clock.centerDots;
         if (cfg.clock.style) Object.assign(state.clock.style, cfg.clock.style);
         state.clock.style.fontKey = normalizeFontKey(state.clock.style.fontKey);
+        if (cfg.clock.splitStyle) Object.assign(state.clock.splitStyle, cfg.clock.splitStyle);
       }
       if (cfg.date) {
         state.date.enabled = cfg.date.enabled !== false;
@@ -2629,6 +2863,7 @@
 
       syncTextLayerUi("clock", state.clock);
       syncTextLayerUi("date", state.date);
+      syncClockSplitUi();
       syncImageUi();
     } catch (e) {
       // configurazione vecchia o incompleta: si resta sui valori attuali
