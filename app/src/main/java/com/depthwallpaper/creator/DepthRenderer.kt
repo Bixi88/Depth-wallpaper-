@@ -95,15 +95,17 @@ object DepthRenderer {
      *
      * Con lo stile separato attivo, ore e minuti diventano due disegni
      * indipendenti (stesso font/dimensione/tracking/contorno/alone/ombra, presi
-     * dallo stile base, ma colore e grassetto propri): condividono pero'
-     * sempre lo stesso passaggio ("back" o "front", da split.layer) e sempre la
-     * stessa posizione/rotazione (x/y/rotation dello style base), quindi
-     * viaggiano sempre insieme rispetto al soggetto ritagliato e non possono
-     * essere trascinati o posizionati singolarmente. split.arrangement sceglie
-     * solo la disposizione RECIPROCA: "horizontal" (default) affianca ore e
-     * minuti sulla stessa riga; "vertical" mette le ore sulla riga sopra e i
-     * minuti su quella sotto, senza i due punti centrali (non necessari: le
-     * due righe sono gia' visivamente separate).
+     * dallo stile base, ma colore, grassetto e passaggio propri): condividono
+     * sempre la stessa posizione/rotazione (x/y/rotation dello style base),
+     * quindi viaggiano sempre insieme rispetto al soggetto ritagliato e non
+     * possono essere trascinati o posizionati singolarmente, ma ciascuno puo'
+     * stare per conto suo sopra o sotto al soggetto ritagliato
+     * (split.hourLayer / split.minuteLayer). split.arrangement sceglie invece
+     * la disposizione RECIPROCA: "horizontal" (default) affianca ore e minuti
+     * sulla stessa riga; "vertical" mette le ore sulla riga sopra e i minuti
+     * su quella sotto (distanza regolabile con split.verticalGap), senza i due
+     * punti centrali (non necessari: le due righe sono gia' visivamente
+     * separate).
      */
     private fun drawClockLayer(canvas: Canvas, w: Float, h: Float, k: Float, clock: ClockConfig, pass: String) {
         val text = clockText(clock)
@@ -114,16 +116,15 @@ object DepthRenderer {
             }
             return
         }
-        if (split.layer != pass) return
+
+        val drawHour = split.hourLayer == pass
+        val drawMinute = split.minuteLayer == pass
+        if (!drawHour && !drawMinute) return
 
         // Sottostringa "ore" isolata con un pattern dedicato (serve solo a
-        // misurarne la larghezza esatta): H/h possono avere 1 o 2 cifre a
-        // seconda dell'ora corrente, mentre HH ne ha sempre 2.
-        val hourPattern = when (clock.format) {
-            "24short" -> "H"
-            "12", "12ampm" -> "h"
-            else -> "HH"
-        }
+        // misurarne la larghezza esatta): H puo' avere 1 o 2 cifre a seconda
+        // dell'ora corrente, mentre HH ne ha sempre 2.
+        val hourPattern = if (clock.format == "24short") "H" else "HH"
         val hourPart = try {
             SimpleDateFormat(hourPattern, Locale.getDefault()).format(Date())
         } catch (e: Exception) {
@@ -134,38 +135,45 @@ object DepthRenderer {
             // Ore sopra, minuti sotto: due righe fisse (niente ":" ne' a-capo
             // automatico), sempre disegnate come un unico blocco che si trascina
             // e si posiziona solo insieme (vedi drawTextLayer/stackedLines sopra).
-            val minutePattern = if (clock.format == "12ampm") "mm a" else "mm"
             val minutePart = try {
-                SimpleDateFormat(minutePattern, Locale.getDefault()).format(Date())
+                SimpleDateFormat("mm", Locale.getDefault()).format(Date())
             } catch (e: Exception) {
                 ""
             }
             val stackedLines = listOf(hourPart, minutePart)
-            drawTextLayer(
-                canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = false,
-                splitSide = "top",
-                colorOverride = split.hourColor, boldOverride = split.hourBold,
-                stackedLines = stackedLines
-            )
-            drawTextLayer(
-                canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = false,
-                splitSide = "bottom",
-                colorOverride = split.minuteColor, boldOverride = split.minuteBold,
-                stackedLines = stackedLines
-            )
+            if (drawHour) {
+                drawTextLayer(
+                    canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = false,
+                    splitSide = "top",
+                    colorOverride = split.hourColor, boldOverride = split.hourBold,
+                    stackedLines = stackedLines, extraLineGap = split.verticalGap
+                )
+            }
+            if (drawMinute) {
+                drawTextLayer(
+                    canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = false,
+                    splitSide = "bottom",
+                    colorOverride = split.minuteColor, boldOverride = split.minuteBold,
+                    stackedLines = stackedLines, extraLineGap = split.verticalGap
+                )
+            }
             return
         }
 
-        drawTextLayer(
-            canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = clock.centerDots,
-            splitAt = hourPart, splitSide = "before",
-            colorOverride = split.hourColor, boldOverride = split.hourBold
-        )
-        drawTextLayer(
-            canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = clock.centerDots,
-            splitAt = hourPart, splitSide = "after",
-            colorOverride = split.minuteColor, boldOverride = split.minuteBold
-        )
+        if (drawHour) {
+            drawTextLayer(
+                canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = clock.centerDots,
+                splitAt = hourPart, splitSide = "before",
+                colorOverride = split.hourColor, boldOverride = split.hourBold
+            )
+        }
+        if (drawMinute) {
+            drawTextLayer(
+                canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = clock.centerDots,
+                splitAt = hourPart, splitSide = "after",
+                colorOverride = split.minuteColor, boldOverride = split.minuteBold
+            )
+        }
     }
 
     // -------------------------------------------------------------------------------
@@ -324,7 +332,11 @@ object DepthRenderer {
         // centrate come un unico blocco, esattamente come gia' avviene per la
         // disposizione orizzontale (splitAt/"before"/"after"): ore e minuti
         // restano cosi' sempre un solo riquadro, spostabile solo insieme.
-        stackedLines: List<String>? = null
+        stackedLines: List<String>? = null,
+        // extraLineGap: solo con stackedLines, px @1080 di distanza AGGIUNTIVA tra
+        // le due righe (oltre alla normale altezza riga), per lo slider
+        // "Spaziatura verticale" dello stile separato. Specchio di app.js.
+        extraLineGap: Float = 0f
     ) {
         if (text.isEmpty()) return
         var sizePx = style.size * k
@@ -364,7 +376,7 @@ object DepthRenderer {
             multiline -> wrapLines(base, text, (w * 0.92f) / sx, tracking, dotsForColon)
             else -> listOf(text)
         }
-        val lineHeight = sizePx * 1.12f
+        val lineHeight = sizePx * 1.12f + (if (stackedLines != null) extraLineGap * k else 0f)
         val firstY = -(lines.size - 1) * lineHeight / 2f
 
         canvas.save()
@@ -740,12 +752,7 @@ object DepthRenderer {
         // per i due puntini disegnati a parte, invece che come glifo del font.
         // Deve restare identico all'editor in assets/js/app.js.
         val sep = if (clock.centerDots) "':'" else ""
-        val pattern = when (clock.format) {
-            "24short" -> "H${sep}mm"
-            "12" -> "h${sep}mm"
-            "12ampm" -> "h${sep}mm a"
-            else -> "HH${sep}mm"
-        }
+        val pattern = if (clock.format == "24short") "H${sep}mm" else "HH${sep}mm"
         return try {
             SimpleDateFormat(pattern, Locale.getDefault()).format(Date())
         } catch (e: Exception) {

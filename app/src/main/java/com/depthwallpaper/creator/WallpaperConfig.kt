@@ -85,43 +85,56 @@ data class TextLayerConfig(
 
 /** Stile separato per ore e minuti (facoltativo, solo modalita' "time"): colore
  *  e grassetto indipendenti, e possibilita' di mettere l'uno sopra e l'altro
- *  sotto il soggetto ritagliato. Il resto (font, dimensione, contorno, alone,
- *  ombra, posizione) resta condiviso dallo style base dell'orologio. Ore e
- *  minuti condividono sempre la stessa posizione (layer) e la stessa
- *  posizione/rotazione sullo schermo: formano un unico blocco che si
- *  trascina e si posiziona solo insieme, mai singolarmente. "arrangement"
- *  sceglie la disposizione RECIPROCA di ore e minuti dentro quel blocco:
- *  "horizontal" = ore a sinistra, minuti a destra (comportamento di sempre);
- *  "vertical" = ore sopra, minuti sotto. */
+ *  sotto il soggetto ritagliato, INDIPENDENTEMENTE per ore e minuti. Il resto
+ *  (font, dimensione, contorno, alone, ombra, posizione) resta condiviso
+ *  dallo style base dell'orologio. Ore e minuti condividono sempre la stessa
+ *  posizione/rotazione sullo schermo (x/y/rotation dello style base): formano
+ *  un unico blocco che si trascina e si posiziona solo insieme, mai
+ *  singolarmente. "arrangement" sceglie la disposizione RECIPROCA di ore e
+ *  minuti dentro quel blocco: "horizontal" = ore a sinistra, minuti a destra
+ *  (comportamento di sempre); "vertical" = ore sopra, minuti sotto, con
+ *  "verticalGap" a regolarne la distanza aggiuntiva. */
 data class ClockSplitConfig(
     val enabled: Boolean,
     val hourColor: String,
     val hourBold: Boolean,
     val minuteColor: String,
     val minuteBold: Boolean,
-    val layer: String,      // "back" (sotto al soggetto) | "front" (sopra), condiviso da ore e minuti
-    val arrangement: String // "horizontal" | "vertical", condiviso da ore e minuti
+    val hourLayer: String,   // "back" (sotto al soggetto) | "front" (sopra)
+    val minuteLayer: String,
+    val arrangement: String, // "horizontal" | "vertical", condiviso da ore e minuti
+    val verticalGap: Float = 0f // px @1080, extra distanza tra ore e minuti in disposizione verticale
 ) {
     companion object {
-        fun fromJson(o: JSONObject?, defBold: Boolean): ClockSplitConfig {
+        fun fromJson(o: JSONObject?): ClockSplitConfig {
             val j = o ?: JSONObject()
+            // Compatibilita' con configurazioni salvate prima che ore e minuti
+            // potessero stare su passaggi diversi (un solo campo "layer" condiviso).
+            val legacyLayer = if (j.has("layer") && !j.has("hourLayer") && !j.has("minuteLayer")) {
+                j.optString("layer", "back")
+            } else null
             return ClockSplitConfig(
                 enabled = j.optBoolean("enabled", false),
                 hourColor = j.optString("hourColor", "#ffffff"),
-                hourBold = j.optBoolean("hourBold", defBold),
+                // Grassetto sempre spento di default: scelta esplicita dell'utente,
+                // indipendente dal grassetto dello stile base dell'orologio.
+                hourBold = j.optBoolean("hourBold", false),
                 minuteColor = j.optString("minuteColor", "#ffffff"),
-                minuteBold = j.optBoolean("minuteBold", defBold),
-                layer = j.optString("layer", "back"),
-                arrangement = j.optString("arrangement", "horizontal")
+                minuteBold = j.optBoolean("minuteBold", false),
+                hourLayer = j.optString("hourLayer", legacyLayer ?: "back"),
+                minuteLayer = j.optString("minuteLayer", legacyLayer ?: "back"),
+                arrangement = j.optString("arrangement", "horizontal"),
+                verticalGap = j.optDouble("verticalGap", 0.0).toFloat()
             )
         }
 
-        fun default(bold: Boolean) = ClockSplitConfig(
+        fun default() = ClockSplitConfig(
             enabled = false,
-            hourColor = "#ffffff", hourBold = bold,
-            minuteColor = "#ffffff", minuteBold = bold,
-            layer = "back",
-            arrangement = "horizontal"
+            hourColor = "#ffffff", hourBold = false,
+            minuteColor = "#ffffff", minuteBold = false,
+            hourLayer = "back", minuteLayer = "back",
+            arrangement = "horizontal",
+            verticalGap = 0f
         )
     }
 }
@@ -131,7 +144,7 @@ data class ClockConfig(
     val enabled: Boolean,
     val mode: String,       // "time" | "custom"
     val customText: String,
-    val format: String,     // "24" | "24short" | "12" | "12ampm"
+    val format: String,     // "24" | "24short"
     /** Se true, tra ore e minuti compaiono due puntini centrali (stile ":"),
      * disegnati come forme separate e non come glifo del font: i due gruppi
      * di cifre si distanziano automaticamente per lasciargli spazio. */
@@ -169,11 +182,11 @@ data class WallpaperConfig(
                 enabled = true, mode = "time", customText = "", format = "24",
                 centerDots = false,
                 style = TextLayerConfig.default(150f, 0.30f, true),
-                splitStyle = ClockSplitConfig.default(true)
+                splitStyle = ClockSplitConfig.default()
             ),
             date = DateConfig(
                 enabled = true, format = "full", uppercase = false,
-                style = TextLayerConfig.default(38f, 0.38f, false)
+                style = TextLayerConfig.default(38f, 0.30f, false)
             ),
             bgDim = 0f, bgScale = 1f, bgOffX = 0f, bgOffY = 0f, bgRotation = 0f,
             fgScale = 1f, fgOffX = 0f, fgOffY = 0f,
@@ -193,7 +206,7 @@ data class WallpaperConfig(
                     format = c.optString("format", "24"),
                     centerDots = c.optBoolean("centerDots", false),
                     style = TextLayerConfig.fromJson(c.optJSONObject("style"), 150f, 0.30f, true),
-                    splitStyle = ClockSplitConfig.fromJson(c.optJSONObject("splitStyle"), true)
+                    splitStyle = ClockSplitConfig.fromJson(c.optJSONObject("splitStyle"))
                 )
 
                 val d = root.optJSONObject("date") ?: JSONObject()
@@ -201,7 +214,7 @@ data class WallpaperConfig(
                     enabled = d.optBoolean("enabled", true),
                     format = d.optString("format", "full"),
                     uppercase = d.optBoolean("uppercase", false),
-                    style = TextLayerConfig.fromJson(d.optJSONObject("style"), 38f, 0.38f, false)
+                    style = TextLayerConfig.fromJson(d.optJSONObject("style"), 38f, 0.30f, false)
                 )
 
                 WallpaperConfig(

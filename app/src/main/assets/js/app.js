@@ -109,21 +109,27 @@
 
   /** Stile separato ore/minuti (facoltativo, solo orologio in modalita' "ora"):
    *  vedi ClockSplitConfig in WallpaperConfig.kt. Ore e minuti condividono
-   *  sempre lo stesso "layer" (non possono stare uno sopra e l'altro sotto al
-   *  soggetto) e sempre la stessa posizione/rotazione: sono un unico blocco
-   *  che si trascina e si posiziona solo insieme, mai singolarmente.
-   *  "arrangement" sceglie invece la disposizione RECIPROCA di ore e minuti
-   *  all'interno di quel blocco: "horizontal" = ore a sinistra, minuti a
-   *  destra (comportamento di sempre); "vertical" = ore sopra, minuti sotto. */
-  function defaultClockSplit(bold) {
+   *  sempre la stessa posizione/rotazione sullo schermo (x/y/rotation dello
+   *  style base): sono un unico blocco che si trascina e si posiziona solo
+   *  insieme, mai singolarmente. Possono pero' stare separatamente sopra o
+   *  sotto il soggetto ritagliato ("hourLayer"/"minuteLayer"), oltre ad avere
+   *  colore e grassetto propri. "arrangement" sceglie la disposizione
+   *  RECIPROCA di ore e minuti all'interno del blocco: "horizontal" = ore a
+   *  sinistra, minuti a destra (comportamento di sempre); "vertical" = ore
+   *  sopra, minuti sotto, con "verticalGap" a regolarne la distanza. Grassetto
+   *  sempre spento di default quando si attiva lo stile separato: e' una
+   *  scelta esplicita dell'utente, indipendente dal grassetto dello stile base. */
+  function defaultClockSplit() {
     return {
       enabled: false,
       hourColor: "#ffffff",
-      hourBold: !!bold,
+      hourBold: false,
       minuteColor: "#ffffff",
-      minuteBold: !!bold,
-      layer: "back", // "back" (sotto al soggetto) | "front" (sopra)
+      minuteBold: false,
+      hourLayer: "back", // "back" (sotto al soggetto) | "front" (sopra)
+      minuteLayer: "back",
       arrangement: "horizontal", // "horizontal" | "vertical"
+      verticalGap: 0, // px @1080, extra distanza tra ore e minuti in disposizione verticale
     };
   }
 
@@ -136,9 +142,9 @@
     clock: {
       enabled: true, mode: "time", customText: "", format: "24", centerDots: false,
       style: defaultStyle(150, 0.30, true),
-      splitStyle: defaultClockSplit(true),
+      splitStyle: defaultClockSplit(),
     },
-    date: { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.38, false) },
+    date: { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.30, false) },
   };
 
   const isNative = typeof Android !== "undefined" && Android !== null;
@@ -182,18 +188,13 @@
     const now = new Date();
     const h = now.getHours();
     const m = now.getMinutes();
-    const h12 = h % 12 === 0 ? 12 : h % 12;
     // Ore e minuti attaccati, senza alcun separatore (ne' ":" ne' spazio), a meno
     // che i "puntini centrali" non siano attivi: in quel caso si inserisce un ':'
     // letterale, che drawTextLayer riconosce come segnaposto per i due puntini
     // disegnati a parte (non come glifo del font). Specchio di DepthRenderer.kt.
+    // Solo formato 24 ore: "24" (con zero iniziale) o "24short" (senza).
     const sep = c.centerDots ? ":" : "";
-    switch (c.format) {
-      case "24short": return h + sep + pad2(m);
-      case "12": return h12 + sep + pad2(m);
-      case "12ampm": return h12 + sep + pad2(m) + (h < 12 ? " AM" : " PM");
-      default: return pad2(h) + sep + pad2(m);
-    }
+    return c.format === "24short" ? h + sep + pad2(m) : pad2(h) + sep + pad2(m);
   }
 
   /** Isola la sola sottostringa "ore" (per il confine ore/minuti dello stile
@@ -202,26 +203,15 @@
   function clockHourPart(format) {
     const now = new Date();
     const h = now.getHours();
-    const h12 = h % 12 === 0 ? 12 : h % 12;
-    switch (format) {
-      case "24short": return String(h);
-      case "12":
-      case "12ampm": return String(h12);
-      default: return pad2(h);
-    }
+    return format === "24short" ? String(h) : pad2(h);
   }
 
   /** Isola la sola sottostringa "minuti" (per la disposizione verticale dello
    *  stile separato): specchio di clockHourPart() sopra e di
    *  drawClockLayer in DepthRenderer.kt. */
-  function clockMinutePart(format) {
+  function clockMinutePart() {
     const now = new Date();
-    const h = now.getHours();
-    const m = now.getMinutes();
-    switch (format) {
-      case "12ampm": return pad2(m) + (h < 12 ? " AM" : " PM");
-      default: return pad2(m);
-    }
+    return pad2(now.getMinutes());
   }
 
   function dateString() {
@@ -409,8 +399,8 @@
    */
   function addFadeDownStops(grad, color, amount) {
     const t = Math.max(0, Math.min(1, amount));
-    let fadeTop = Math.max(0, Math.min(1, 1 - t));       // dove l'alpha inizia a scendere da 1
-    let fadeBottom = Math.max(0, Math.min(1, 1 - t * 0.5)); // dove l'alpha arriva a 0
+    let fadeTop = Math.max(0, Math.min(1, 1 - t * 1.15));    // dove l'alpha inizia a scendere da 1
+    let fadeBottom = Math.max(0, Math.min(1, 1 - t * 0.35)); // dove l'alpha arriva a 0
     if (fadeBottom <= fadeTop) fadeBottom = Math.min(1, fadeTop + 0.001);
     grad.addColorStop(0, color);
     if (fadeTop > 0) grad.addColorStop(fadeTop, color);
@@ -427,8 +417,11 @@
    *  chiamata. Le due chiamate (ore/minuti) misurano comunque ENTRAMBE le righe per
    *  restare centrate come un unico blocco, esattamente come gia' avviene per la
    *  disposizione orizzontale (splitAt/"before"/"after"): ore e minuti restano
-   *  cosi' sempre un solo riquadro, che si trascina e si posiziona solo insieme. */
-  function drawTextLayer(context, w, h, style, text, multiline, dotsForColon, splitAt, splitSide, colorOverride, boldOverride, stackedLines) {
+   *  cosi' sempre un solo riquadro, che si trascina e si posiziona solo insieme.
+   *  extraLineGap: solo con stackedLines, px @1080 di distanza AGGIUNTIVA tra le
+   *  due righe (oltre alla normale altezza riga), per lo slider "Spaziatura
+   *  verticale" dello stile separato. Specchio esatto di DepthRenderer.kt. */
+  function drawTextLayer(context, w, h, style, text, multiline, dotsForColon, splitAt, splitSide, colorOverride, boldOverride, stackedLines, extraLineGap) {
     if (!text) return null;
     const k = w / CANVAS_W;
     let size = style.size * k;
@@ -474,7 +467,7 @@
     context.scale(sx, sy);
 
     const lines = stackedLines ? stackedLines.slice() : (multiline ? wrapLines(context, text, (w * 0.92) / sx, tracking, dotsForColon) : [String(text)]);
-    const lineHeight = size * 1.12;
+    const lineHeight = size * 1.12 + (stackedLines && extraLineGap ? extraLineGap * k : 0);
     const firstY = (-(lines.length - 1) * lineHeight) / 2;
 
     let maxW = 0;
@@ -616,35 +609,54 @@
       }
       return null;
     }
-    if (split.layer !== pass) return null;
+
+    // Ore e minuti possono stare su passaggi diversi (uno sopra, l'altro sotto
+    // il soggetto): ognuno si disegna solo nel proprio passaggio. Il riquadro
+    // restituito (per il trascinamento sull'anteprima) rappresenta comunque
+    // sempre il blocco INTERO, qualunque parte venga disegnata in questa
+    // chiamata: drawTextLayer lo misura sul testo completo, non sulla sola
+    // porzione visibile (vedi commento su "lines"/"maxW" li' sopra).
+    const drawHour = split.hourLayer === pass;
+    const drawMinute = split.minuteLayer === pass;
+    if (!drawHour && !drawMinute) return null;
 
     if (split.arrangement === "vertical") {
       // Ore sopra, minuti sotto: due righe fisse (niente ":" ne' a-capo
       // automatico), sempre disegnate come un unico blocco che si trascina e
       // si posiziona solo insieme (vedi drawTextLayer/stackedLines sopra).
       const hourPart = clockHourPart(clock.format);
-      const minutePart = clockMinutePart(clock.format);
+      const minutePart = clockMinutePart();
       const stackedLines = [hourPart, minutePart];
-      const box = drawTextLayer(
-        context, w, h, clock.style, text, false, false,
-        null, "top", split.hourColor, split.hourBold, stackedLines
-      );
-      drawTextLayer(
-        context, w, h, clock.style, text, false, false,
-        null, "bottom", split.minuteColor, split.minuteBold, stackedLines
-      );
+      let box = null;
+      if (drawHour) {
+        box = drawTextLayer(
+          context, w, h, clock.style, text, false, false,
+          null, "top", split.hourColor, split.hourBold, stackedLines, split.verticalGap
+        ) || box;
+      }
+      if (drawMinute) {
+        box = drawTextLayer(
+          context, w, h, clock.style, text, false, false,
+          null, "bottom", split.minuteColor, split.minuteBold, stackedLines, split.verticalGap
+        ) || box;
+      }
       return box;
     }
 
     const hourPart = clockHourPart(clock.format);
-    const box = drawTextLayer(
-      context, w, h, clock.style, text, false, clock.centerDots,
-      hourPart, "before", split.hourColor, split.hourBold
-    );
-    drawTextLayer(
-      context, w, h, clock.style, text, false, clock.centerDots,
-      hourPart, "after", split.minuteColor, split.minuteBold
-    );
+    let box = null;
+    if (drawHour) {
+      box = drawTextLayer(
+        context, w, h, clock.style, text, false, clock.centerDots,
+        hourPart, "before", split.hourColor, split.hourBold
+      ) || box;
+    }
+    if (drawMinute) {
+      box = drawTextLayer(
+        context, w, h, clock.style, text, false, clock.centerDots,
+        hourPart, "after", split.minuteColor, split.minuteBold
+      ) || box;
+    }
     return box;
   }
 
@@ -665,7 +677,7 @@
       context.fillRect(0, 0, w, h);
     }
 
-    const clockBox = state.clock.enabled
+    let clockBox = state.clock.enabled
       ? drawClockLayer(context, w, h, state.clock, "back")
       : null;
 
@@ -685,7 +697,11 @@
     }
 
     if (state.clock.enabled) {
-      drawClockLayer(context, w, h, state.clock, "front");
+      // Con posizione separata per ore e minuti, e' possibile che nel passaggio
+      // "back" non venga disegnato nulla (es. entrambi sopra al soggetto): il
+      // riquadro per il trascinamento arriva allora dal passaggio "front".
+      const frontBox = drawClockLayer(context, w, h, state.clock, "front");
+      clockBox = clockBox || frontBox;
     }
 
     return { clockBox, dateBox };
@@ -975,7 +991,7 @@
       const width = Math.max(1, input.getBoundingClientRect().width - THUMB_SIZE);
       const span = s.max - s.min;
       let v = drag.startVal + (dx / width) * span;
-      if (Math.abs(v - s.center) <= span * MAGNET) v = s.center;
+      if (!s.noMagnet && Math.abs(v - s.center) <= span * MAGNET) v = s.center;
       applySlider(s, v, true);
     }
 
@@ -1050,6 +1066,11 @@
       min: Number(input.min),
       max: Number(input.max),
       center: input.dataset.center !== undefined ? Number(input.dataset.center) : Number(input.value),
+      // Alcuni slider (es. posizione verticale di orologio/data) restano volutamente
+      // SENZA snap magnetico: il valore "centrale" resta comunque il riferimento per
+      // il pulsante "↺" di ripristino, ma il trascinamento deve restare fluido su
+      // tutta l'escursione, senza aggancio a meta' corsa.
+      noMagnet: input.dataset.noMagnet !== undefined,
     };
     sliders[rangeId] = s;
     buildSliderRow(s);
@@ -2389,42 +2410,87 @@
     const sp = state.clock.splitStyle;
     return !!sp.enabled && sp.arrangement === "vertical";
   }
+  // Il gruppo "colore / grassetto / posizione rispetto al soggetto" e'
+  // condiviso da un unico segmented control "Ore"/"Minuti": invece di due
+  // sezioni identiche duplicate (una per ore, una per minuti, sempre entrambe
+  // visibili), si sceglie a quale delle due si riferiscono i controlli sotto
+  // al segmented control, e questi si aggiornano di conseguenza. Riduce
+  // drasticamente lo spazio verticale occupato e rispecchia il pattern dei
+  // "segmented control" usato per opzioni mutuamente esclusive che condividono
+  // gli stessi controlli (es. formattazione testo in editor di testo/foto).
+  let clockSplitTarget = "hour"; // "hour" | "minute"
+  const clockSplitTargetButtons = Array.from(document.querySelectorAll("#clockSplitTargetSeg .segmented-btn"));
+
+  function syncClockSplitTargetUi() {
+    const sp = state.clock.splitStyle;
+    const isHour = clockSplitTarget === "hour";
+    clockSplitTargetButtons.forEach((b) => {
+      const active = b.dataset.target === clockSplitTarget;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-selected", active ? "true" : "false");
+    });
+    setColorValue(document.getElementById("clockSplitColorPicker"), isHour ? sp.hourColor : sp.minuteColor);
+    document.getElementById("clockSplitBoldCheck").checked = isHour ? !!sp.hourBold : !!sp.minuteBold;
+    document.getElementById("clockSplitLayerSelect").value = (isHour ? sp.hourLayer : sp.minuteLayer) || "back";
+  }
+  clockSplitTargetButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      clockSplitTarget = btn.dataset.target;
+      syncClockSplitTargetUi();
+    });
+  });
+
   function syncClockSplitUi() {
     const sp = state.clock.splitStyle;
     document.getElementById("clockSplitEnabledCheck").checked = !!sp.enabled;
     clockSplitGroup.classList.toggle("hidden", !sp.enabled);
     document.getElementById("clockSplitArrangementSelect").value = sp.arrangement || "horizontal";
-    document.getElementById("clockSplitLayerSelect").value = sp.layer || "back";
-    setColorValue(document.getElementById("clockHourColorPicker"), sp.hourColor);
-    document.getElementById("clockHourBoldCheck").checked = !!sp.hourBold;
-    setColorValue(document.getElementById("clockMinuteColorPicker"), sp.minuteColor);
-    document.getElementById("clockMinuteBoldCheck").checked = !!sp.minuteBold;
 
     const verticalActive = isVerticalSplitActive();
+    document.getElementById("clockSplitGapGroup").classList.toggle("hidden", !verticalActive);
+    setSlider("clockSplitGapRange", sp.verticalGap || 0);
     if (verticalActive && state.clock.centerDots) {
       state.clock.centerDots = false;
       clockCenterDotsCheck.checked = false;
     }
     clockCenterDotsGroup.classList.toggle("hidden", verticalActive);
+
+    syncClockSplitTargetUi();
   }
   bindCheck("clockSplitEnabledCheck", (v) => {
     state.clock.splitStyle.enabled = v;
+    if (v) {
+      // "Quando sblocco la gestione separata, ore e minuti partono sempre non
+      // in grassetto": scelta esplicita dell'utente, indipendente dal
+      // grassetto dello stile base e da eventuali valori lasciati da una
+      // sessione precedente.
+      state.clock.splitStyle.hourBold = false;
+      state.clock.splitStyle.minuteBold = false;
+    }
     syncClockSplitUi();
   });
   bindSelect("clockSplitArrangementSelect", (v) => {
     state.clock.splitStyle.arrangement = v;
     syncClockSplitUi();
   });
-  bindSelect("clockSplitLayerSelect", (v) => { state.clock.splitStyle.layer = v; });
-  bindColor("clockHourColorPicker", (hex) => { state.clock.splitStyle.hourColor = hex; });
-  bindCheck("clockHourBoldCheck", (v) => { state.clock.splitStyle.hourBold = v; });
-  bindColor("clockMinuteColorPicker", (hex) => { state.clock.splitStyle.minuteColor = hex; });
-  bindCheck("clockMinuteBoldCheck", (v) => { state.clock.splitStyle.minuteBold = v; });
+  bindRange("clockSplitGapRange", "clockSplitGapValue", (v) => { state.clock.splitStyle.verticalGap = v; });
+  bindSelect("clockSplitLayerSelect", (v) => {
+    if (clockSplitTarget === "hour") state.clock.splitStyle.hourLayer = v;
+    else state.clock.splitStyle.minuteLayer = v;
+  });
+  bindColor("clockSplitColorPicker", (hex) => {
+    if (clockSplitTarget === "hour") state.clock.splitStyle.hourColor = hex;
+    else state.clock.splitStyle.minuteColor = hex;
+  });
+  bindCheck("clockSplitBoldCheck", (v) => {
+    if (clockSplitTarget === "hour") state.clock.splitStyle.hourBold = v;
+    else state.clock.splitStyle.minuteBold = v;
+  });
   syncClockSplitUi();
 
   document.getElementById("clockResetBtn").addEventListener("click", () => {
     state.clock.style = defaultStyle(150, 0.30, true);
-    state.clock.splitStyle = defaultClockSplit(true);
+    state.clock.splitStyle = defaultClockSplit();
     syncTextLayerUi("clock", state.clock);
     syncClockSplitUi();
     renderPreview();
@@ -2437,7 +2503,7 @@
   bindCheck("dateUppercaseCheck", (v) => { state.date.uppercase = v; });
 
   document.getElementById("dateResetBtn").addEventListener("click", () => {
-    state.date.style = defaultStyle(38, 0.38, false);
+    state.date.style = defaultStyle(38, 0.30, false);
     syncTextLayerUi("date", state.date);
     renderPreview();
     showToast("Data ripristinata");
@@ -2504,8 +2570,8 @@
     resetAllArmed = false;
     clearTimeout(resetAllTimer);
 
-    state.clock = { enabled: true, mode: "time", customText: "", format: "24", centerDots: false, style: defaultStyle(150, 0.30, true), splitStyle: defaultClockSplit(true) };
-    state.date = { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.38, false) };
+    state.clock = { enabled: true, mode: "time", customText: "", format: "24", centerDots: false, style: defaultStyle(150, 0.30, true), splitStyle: defaultClockSplit() };
+    state.date = { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.30, false) };
     state.bgDim = 0;
     state.linkFgToBg = false;
     state.bg.scale = 1; state.bg.offX = 0; state.bg.offY = 0; state.bg.rotation = 0;
@@ -2764,7 +2830,10 @@
       enabled: !!sp.enabled,
       hourColor: sp.hourColor, hourBold: !!sp.hourBold,
       minuteColor: sp.minuteColor, minuteBold: !!sp.minuteBold,
-      layer: sp.layer || "back",
+      hourLayer: sp.hourLayer || "back",
+      minuteLayer: sp.minuteLayer || "back",
+      arrangement: sp.arrangement || "horizontal",
+      verticalGap: sp.verticalGap || 0,
     };
   }
 
@@ -2832,7 +2901,16 @@
         state.clock.centerDots = !!cfg.clock.centerDots;
         if (cfg.clock.style) Object.assign(state.clock.style, cfg.clock.style);
         state.clock.style.fontKey = normalizeFontKey(state.clock.style.fontKey);
-        if (cfg.clock.splitStyle) Object.assign(state.clock.splitStyle, cfg.clock.splitStyle);
+        if (cfg.clock.splitStyle) {
+          const savedSplit = cfg.clock.splitStyle;
+          // Compatibilita' con configurazioni salvate prima che ore e minuti
+          // potessero stare su passaggi diversi (un solo campo "layer" condiviso).
+          if (savedSplit.layer && !savedSplit.hourLayer && !savedSplit.minuteLayer) {
+            savedSplit.hourLayer = savedSplit.layer;
+            savedSplit.minuteLayer = savedSplit.layer;
+          }
+          Object.assign(state.clock.splitStyle, savedSplit);
+        }
       }
       if (cfg.date) {
         state.date.enabled = cfg.date.enabled !== false;

@@ -640,6 +640,34 @@ input[type="text"], select {
 }
 .color-swatch-btn.hidden { display: none; }
 
+/* Segmented control: sceglie a quale tra piu' sotto-elementi (es. "Ore"/"Minuti")
+   si riferiscono i controlli mostrati subito sotto, cosi' non si duplica lo
+   stesso gruppo di campi una volta per ciascuno. */
+.segmented-control {
+  display: flex;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 3px;
+}
+.segmented-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-1);
+  font-size: 13.5px;
+  font-weight: 700;
+  padding: 8px 0;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.segmented-btn.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
 /* ---------------- POPOVER COLORE PERSONALIZZATO ---------------- */
 .color-popover-backdrop {
   position: fixed;

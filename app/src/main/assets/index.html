@@ -152,8 +152,6 @@
             <select id="clockFormatSelect">
               <option value="24" selected>24 ore &middot; 09:05</option>
               <option value="24short">24 ore senza zero &middot; 9:05</option>
-              <option value="12">12 ore &middot; 9:05</option>
-              <option value="12ampm">12 ore con AM/PM</option>
             </select>
           </div>
 
@@ -181,35 +179,39 @@
               </select>
               <p class="hint-text">Ore e minuti restano sempre un unico blocco: si trascinano, ruotano e posizionano solo insieme, mai separatamente. Con la disposizione verticale i puntini centrali non sono disponibili, perche' le due righe li rendono superflui.</p>
             </div>
+
+            <div class="field-group hidden" id="clockSplitGapGroup">
+              <label>Spaziatura verticale <span class="value-badge" id="clockSplitGapValue">0</span></label>
+              <input type="range" id="clockSplitGapRange" min="-60" max="300" value="0" data-center="0" />
+              <p class="hint-text">Distanza tra la riga delle ore e quella dei minuti, in aggiunta a quella normale.</p>
+            </div>
+
+            <!-- Un solo segmented control ("Ore"/"Minuti") seleziona a quale delle
+                 due si riferiscono colore, grassetto e posizione qui sotto: evita di
+                 duplicare due volte lo stesso gruppo di controlli, uno per le ore e
+                 uno (identico) per i minuti. -->
             <div class="field-group">
-              <label for="clockSplitLayerSelect">Posizione rispetto al soggetto (condivisa da ore e minuti)</label>
+              <div class="segmented-control" id="clockSplitTargetSeg" role="tablist" aria-label="Ore o minuti">
+                <button type="button" class="segmented-btn active" data-target="hour" role="tab" aria-selected="true">Ore</button>
+                <button type="button" class="segmented-btn" data-target="minute" role="tab" aria-selected="false">Minuti</button>
+              </div>
+            </div>
+            <div class="field-group">
+              <label>Colore</label>
+              <div class="color-row">
+                <button type="button" class="color-swatch-btn" id="clockSplitColorPicker" data-value="#ffffff"></button>
+              </div>
+            </div>
+            <div class="field-group">
+              <label class="checkbox-row"><input type="checkbox" id="clockSplitBoldCheck" /><span>Grassetto</span></label>
+            </div>
+            <div class="field-group">
+              <label for="clockSplitLayerSelect">Posizione rispetto al soggetto</label>
               <select id="clockSplitLayerSelect">
                 <option value="back">Sotto il soggetto</option>
                 <option value="front">Sopra il soggetto</option>
               </select>
-            </div>
-
-            <div class="field-group section-title">Ore</div>
-            <div class="field-group">
-              <label>Colore ore</label>
-              <div class="color-row">
-                <button type="button" class="color-swatch-btn" id="clockHourColorPicker" data-value="#ffffff"></button>
-              </div>
-            </div>
-            <div class="field-group">
-              <label class="checkbox-row"><input type="checkbox" id="clockHourBoldCheck" checked /><span>Grassetto ore</span></label>
-            </div>
-
-            <div class="field-group section-title">Minuti</div>
-            <div class="field-group">
-              <label>Colore minuti</label>
-              <div class="color-row">
-                <button type="button" class="color-swatch-btn" id="clockMinuteColorPicker" data-value="#ffffff"></button>
-              </div>
-            </div>
-            <div class="field-group">
-              <label class="checkbox-row"><input type="checkbox" id="clockMinuteBoldCheck" checked /><span>Grassetto minuti</span></label>
-              <p class="hint-text">I due punti centrali (se attivi) seguono la stessa posizione di ore e minuti.</p>
+              <p class="hint-text">I due punti centrali (se attivi) seguono sempre la stessa posizione di ore e minuti.</p>
             </div>
           </div>
 
@@ -220,7 +222,7 @@
           </div>
           <div class="field-group">
             <label>Verticale <span class="value-badge" id="clockYValue">30%</span></label>
-            <input type="range" id="clockYRange" min="0" max="100" value="30" data-center="30" />
+            <input type="range" id="clockYRange" min="0" max="100" value="30" data-center="30" data-no-magnet="1" />
           </div>
           <div class="field-group">
             <label>Rotazione <span class="value-badge" id="clockRotationValue">0&deg;</span></label>
@@ -338,8 +340,8 @@
             <input type="range" id="dateXRange" min="0" max="100" value="50" data-center="50" />
           </div>
           <div class="field-group">
-            <label>Verticale <span class="value-badge" id="dateYValue">38%</span></label>
-            <input type="range" id="dateYRange" min="0" max="100" value="38" data-center="38" />
+            <label>Verticale <span class="value-badge" id="dateYValue">30%</span></label>
+            <input type="range" id="dateYRange" min="0" max="100" value="30" data-center="30" data-no-magnet="1" />
           </div>
           <div class="field-group">
             <label>Rotazione <span class="value-badge" id="dateRotationValue">0&deg;</span></label>
