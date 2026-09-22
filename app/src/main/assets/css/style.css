@@ -751,12 +751,6 @@ input[type="text"], select {
   cursor: pointer;
 }
 .checkbox-row input { width: 18px; height: 18px; accent-color: var(--accent); }
-.checkbox-row .accent-label {
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 700;
-}
 
 .segmented {
   display: flex;
