@@ -129,7 +129,7 @@
       hourLayer: "back", // "back" (sotto al soggetto) | "front" (sopra)
       minuteLayer: "back",
       arrangement: "horizontal", // "horizontal" | "vertical"
-      verticalGap: 0, // px @1080, extra distanza tra ore e minuti in disposizione verticale
+      verticalGap: 100, // 0..100: 100 = spaziatura normale, 0 = ore/minuti a contatto
     };
   }
 
@@ -418,10 +418,14 @@
    *  restare centrate come un unico blocco, esattamente come gia' avviene per la
    *  disposizione orizzontale (splitAt/"before"/"after"): ore e minuti restano
    *  cosi' sempre un solo riquadro, che si trascina e si posiziona solo insieme.
-   *  extraLineGap: solo con stackedLines, px @1080 di distanza AGGIUNTIVA tra le
-   *  due righe (oltre alla normale altezza riga), per lo slider "Spaziatura
-   *  verticale" dello stile separato. Specchio esatto di DepthRenderer.kt. */
-  function drawTextLayer(context, w, h, style, text, multiline, dotsForColon, splitAt, splitSide, colorOverride, boldOverride, stackedLines, extraLineGap) {
+   *  gapPercent: solo con stackedLines, 0..100 per lo slider "Spaziatura
+   *  verticale" dello stile separato. 100 = spaziatura normale (invariata),
+   *  0 = ore e minuti accostati fino a toccarsi, senza sovrapporsi ne'
+   *  tagliare i caratteri: il valore intermedio interpola tra l'altezza reale
+   *  del testo (misurata con actualBoundingBox, quindi valida per qualunque
+   *  font/dimensione) e l'altezza di riga normale. Specchio esatto di
+   *  DepthRenderer.kt. */
+  function drawTextLayer(context, w, h, style, text, multiline, dotsForColon, splitAt, splitSide, colorOverride, boldOverride, stackedLines, gapPercent) {
     if (!text) return null;
     const k = w / CANVAS_W;
     let size = style.size * k;
@@ -467,7 +471,23 @@
     context.scale(sx, sy);
 
     const lines = stackedLines ? stackedLines.slice() : (multiline ? wrapLines(context, text, (w * 0.92) / sx, tracking, dotsForColon) : [String(text)]);
-    const lineHeight = size * 1.12 + (stackedLines && extraLineGap ? extraLineGap * k : 0);
+    const normalLineHeight = size * 1.12;
+    let lineHeight = normalLineHeight;
+    if (stackedLines) {
+      // Altezza minima ("toccano completamente"): l'altezza reale delle cifre
+      // per il font/dimensione correnti, cosi' le due righe si accostano fino
+      // a sfiorarsi senza mai tagliare i caratteri (il ritaglio verticale
+      // sopra usa esattamente questa altezza come banda per riga).
+      let tightHeight = normalLineHeight;
+      try {
+        const mm = context.measureText("0123456789");
+        if (mm.actualBoundingBoxAscent !== undefined && mm.actualBoundingBoxDescent !== undefined) {
+          tightHeight = Math.min(normalLineHeight, mm.actualBoundingBoxAscent + mm.actualBoundingBoxDescent);
+        }
+      } catch (e) { /* fallback gia' impostato su normalLineHeight */ }
+      const t = Math.max(0, Math.min(100, gapPercent != null ? gapPercent : 100)) / 100;
+      lineHeight = tightHeight + t * (normalLineHeight - tightHeight);
+    }
     const firstY = (-(lines.length - 1) * lineHeight) / 2;
 
     let maxW = 0;
@@ -603,27 +623,34 @@
     if (!text) return null;
     const multiline = clock.mode === "custom";
     const split = clock.splitStyle;
-    if (!split || !split.enabled || clock.mode === "custom") {
+    // La disposizione (orizzontale/verticale) e' indipendente dalla gestione
+    // separata di colore/grassetto/posizione: si puo' avere ore-sopra-minuti-
+    // sotto anche con stile identico per entrambi, senza dover attivare
+    // "Colore/grassetto/posizione separati".
+    const verticalArrangement = split && split.arrangement === "vertical" && clock.mode !== "custom";
+    const splitStyleActive = !!(split && split.enabled) && clock.mode !== "custom";
+
+    if (!splitStyleActive && !verticalArrangement) {
       if (pass === "back") {
         return drawTextLayer(context, w, h, clock.style, text, multiline, clock.centerDots);
       }
       return null;
     }
 
-    // Ore e minuti possono stare su passaggi diversi (uno sopra, l'altro sotto
-    // il soggetto): ognuno si disegna solo nel proprio passaggio. Il riquadro
-    // restituito (per il trascinamento sull'anteprima) rappresenta comunque
-    // sempre il blocco INTERO, qualunque parte venga disegnata in questa
-    // chiamata: drawTextLayer lo misura sul testo completo, non sulla sola
-    // porzione visibile (vedi commento su "lines"/"maxW" li' sopra).
-    const drawHour = split.hourLayer === pass;
-    const drawMinute = split.minuteLayer === pass;
-    if (!drawHour && !drawMinute) return null;
-
-    if (split.arrangement === "vertical") {
+    if (verticalArrangement) {
       // Ore sopra, minuti sotto: due righe fisse (niente ":" ne' a-capo
       // automatico), sempre disegnate come un unico blocco che si trascina e
       // si posiziona solo insieme (vedi drawTextLayer/stackedLines sopra).
+      // Colore/grassetto per riga e la scelta sopra/sotto il soggetto restano
+      // quelli unificati dello stile base finche' "separati" non e' attivo:
+      // in quel caso entrambe le righe stanno sempre sullo stesso passaggio
+      // ("back"), esattamente come l'orologio normale non diviso.
+      const hourLayerPass = splitStyleActive ? split.hourLayer : "back";
+      const minuteLayerPass = splitStyleActive ? split.minuteLayer : "back";
+      const drawHour = hourLayerPass === pass;
+      const drawMinute = minuteLayerPass === pass;
+      if (!drawHour && !drawMinute) return null;
+
       const hourPart = clockHourPart(clock.format);
       const minutePart = clockMinutePart();
       const stackedLines = [hourPart, minutePart];
@@ -631,17 +658,22 @@
       if (drawHour) {
         box = drawTextLayer(
           context, w, h, clock.style, text, false, false,
-          null, "top", split.hourColor, split.hourBold, stackedLines, split.verticalGap
+          null, "top", splitStyleActive ? split.hourColor : null, splitStyleActive ? split.hourBold : null, stackedLines, split.verticalGap
         ) || box;
       }
       if (drawMinute) {
         box = drawTextLayer(
           context, w, h, clock.style, text, false, false,
-          null, "bottom", split.minuteColor, split.minuteBold, stackedLines, split.verticalGap
+          null, "bottom", splitStyleActive ? split.minuteColor : null, splitStyleActive ? split.minuteBold : null, stackedLines, split.verticalGap
         ) || box;
       }
       return box;
     }
+
+    // Disposizione orizzontale con colore/grassetto/posizione separati.
+    const drawHour = split.hourLayer === pass;
+    const drawMinute = split.minuteLayer === pass;
+    if (!drawHour && !drawMinute) return null;
 
     const hourPart = clockHourPart(clock.format);
     let box = null;
@@ -2408,7 +2440,7 @@
   // quindi il controllo va nascosto e l'opzione forzata a spenta.
   function isVerticalSplitActive() {
     const sp = state.clock.splitStyle;
-    return !!sp.enabled && sp.arrangement === "vertical";
+    return sp.arrangement === "vertical";
   }
   // Il gruppo "colore / grassetto / posizione rispetto al soggetto" e'
   // condiviso da un unico segmented control "Ore"/"Minuti": invece di due
@@ -2448,7 +2480,7 @@
 
     const verticalActive = isVerticalSplitActive();
     document.getElementById("clockSplitGapGroup").classList.toggle("hidden", !verticalActive);
-    setSlider("clockSplitGapRange", sp.verticalGap || 0);
+    setSlider("clockSplitGapRange", sp.verticalGap != null ? sp.verticalGap : 100);
     if (verticalActive && state.clock.centerDots) {
       state.clock.centerDots = false;
       clockCenterDotsCheck.checked = false;

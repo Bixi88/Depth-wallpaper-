@@ -110,16 +110,19 @@ object DepthRenderer {
     private fun drawClockLayer(canvas: Canvas, w: Float, h: Float, k: Float, clock: ClockConfig, pass: String) {
         val text = clockText(clock)
         val split = clock.splitStyle
-        if (split == null || !split.enabled || clock.mode == "custom") {
+        // La disposizione (orizzontale/verticale) e' indipendente dalla gestione
+        // separata di colore/grassetto/posizione: si puo' avere ore-sopra-
+        // minuti-sotto anche con stile identico per entrambi, senza dover
+        // attivare "Colore/grassetto/posizione separati".
+        val verticalArrangement = split != null && split.arrangement == "vertical" && clock.mode != "custom"
+        val splitStyleActive = split != null && split.enabled && clock.mode != "custom"
+
+        if (!splitStyleActive && !verticalArrangement) {
             if (pass == "back") {
                 drawTextLayer(canvas, w, h, k, clock.style, text, multiline = clock.mode == "custom", dotsForColon = clock.centerDots)
             }
             return
         }
-
-        val drawHour = split.hourLayer == pass
-        val drawMinute = split.minuteLayer == pass
-        if (!drawHour && !drawMinute) return
 
         // Sottostringa "ore" isolata con un pattern dedicato (serve solo a
         // misurarne la larghezza esatta): H puo' avere 1 o 2 cifre a seconda
@@ -131,10 +134,20 @@ object DepthRenderer {
             ""
         }
 
-        if (split.arrangement == "vertical") {
+        if (verticalArrangement) {
             // Ore sopra, minuti sotto: due righe fisse (niente ":" ne' a-capo
             // automatico), sempre disegnate come un unico blocco che si trascina
             // e si posiziona solo insieme (vedi drawTextLayer/stackedLines sopra).
+            // Colore/grassetto per riga e la scelta sopra/sotto il soggetto
+            // restano quelli unificati dello stile base finche' "separati" non
+            // e' attivo: in quel caso entrambe le righe stanno sempre sullo
+            // stesso passaggio ("back"), esattamente come l'orologio normale.
+            val hourLayerPass = if (splitStyleActive) split!!.hourLayer else "back"
+            val minuteLayerPass = if (splitStyleActive) split!!.minuteLayer else "back"
+            val drawHour = hourLayerPass == pass
+            val drawMinute = minuteLayerPass == pass
+            if (!drawHour && !drawMinute) return
+
             val minutePart = try {
                 SimpleDateFormat("mm", Locale.getDefault()).format(Date())
             } catch (e: Exception) {
@@ -145,20 +158,28 @@ object DepthRenderer {
                 drawTextLayer(
                     canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = false,
                     splitSide = "top",
-                    colorOverride = split.hourColor, boldOverride = split.hourBold,
-                    stackedLines = stackedLines, extraLineGap = split.verticalGap
+                    colorOverride = if (splitStyleActive) split!!.hourColor else null,
+                    boldOverride = if (splitStyleActive) split!!.hourBold else null,
+                    stackedLines = stackedLines, gapPercent = split?.verticalGap ?: 100f
                 )
             }
             if (drawMinute) {
                 drawTextLayer(
                     canvas, w, h, k, clock.style, text, multiline = false, dotsForColon = false,
                     splitSide = "bottom",
-                    colorOverride = split.minuteColor, boldOverride = split.minuteBold,
-                    stackedLines = stackedLines, extraLineGap = split.verticalGap
+                    colorOverride = if (splitStyleActive) split!!.minuteColor else null,
+                    boldOverride = if (splitStyleActive) split!!.minuteBold else null,
+                    stackedLines = stackedLines, gapPercent = split?.verticalGap ?: 100f
                 )
             }
             return
         }
+
+        // Disposizione orizzontale con colore/grassetto/posizione separati.
+        split!!
+        val drawHour = split.hourLayer == pass
+        val drawMinute = split.minuteLayer == pass
+        if (!drawHour && !drawMinute) return
 
         if (drawHour) {
             drawTextLayer(
@@ -333,10 +354,14 @@ object DepthRenderer {
         // disposizione orizzontale (splitAt/"before"/"after"): ore e minuti
         // restano cosi' sempre un solo riquadro, spostabile solo insieme.
         stackedLines: List<String>? = null,
-        // extraLineGap: solo con stackedLines, px @1080 di distanza AGGIUNTIVA tra
-        // le due righe (oltre alla normale altezza riga), per lo slider
-        // "Spaziatura verticale" dello stile separato. Specchio di app.js.
-        extraLineGap: Float = 0f
+        // gapPercent: solo con stackedLines, 0..100 per lo slider "Spaziatura
+        // verticale" dello stile separato. 100 = spaziatura normale (invariata),
+        // 0 = ore e minuti accostati fino a toccarsi, senza sovrapporsi ne'
+        // tagliare i caratteri: il valore intermedio interpola tra l'altezza
+        // reale del testo (misurata con getTextBounds, quindi valida per
+        // qualunque font/dimensione) e l'altezza di riga normale. Specchio di
+        // app.js.
+        gapPercent: Float = 100f
     ) {
         if (text.isEmpty()) return
         var sizePx = style.size * k
@@ -376,7 +401,24 @@ object DepthRenderer {
             multiline -> wrapLines(base, text, (w * 0.92f) / sx, tracking, dotsForColon)
             else -> listOf(text)
         }
-        val lineHeight = sizePx * 1.12f + (if (stackedLines != null) extraLineGap * k else 0f)
+        val normalLineHeight = sizePx * 1.12f
+        var lineHeight = normalLineHeight
+        if (stackedLines != null) {
+            // Altezza minima ("toccano completamente"): l'altezza reale delle
+            // cifre per il font/dimensione correnti, cosi' le due righe si
+            // accostano fino a sfiorarsi senza mai tagliare i caratteri (il
+            // ritaglio verticale sopra usa esattamente questa altezza come
+            // banda per riga).
+            var tightHeight = normalLineHeight
+            try {
+                val rect = Rect()
+                base.getTextBounds("0123456789", 0, 10, rect)
+                val measured = rect.height().toFloat()
+                if (measured > 0f) tightHeight = minOf(normalLineHeight, measured)
+            } catch (e: Exception) { /* fallback gia' impostato su normalLineHeight */ }
+            val t = gapPercent.coerceIn(0f, 100f) / 100f
+            lineHeight = tightHeight + t * (normalLineHeight - tightHeight)
+        }
         val firstY = -(lines.size - 1) * lineHeight / 2f
 
         canvas.save()

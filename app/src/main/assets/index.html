@@ -163,29 +163,30 @@
           </div>
 
           <div class="field-group section-title">Stile separato ore/minuti</div>
+
+          <div class="field-group">
+            <label for="clockSplitArrangementSelect">Disposizione</label>
+            <select id="clockSplitArrangementSelect">
+              <option value="horizontal">Orizzontale &middot; ore a sinistra, minuti a destra</option>
+              <option value="vertical">Verticale &middot; ore sopra, minuti sotto</option>
+            </select>
+            <p class="hint-text">Ore e minuti restano sempre un unico blocco: si trascinano, ruotano e posizionano solo insieme, mai separatamente. Con la disposizione verticale i puntini centrali non sono disponibili, perche' le due righe li rendono superflui. Disponibile anche senza attivare colore/grassetto/posizione separati qui sotto.</p>
+          </div>
+
+          <div class="field-group hidden" id="clockSplitGapGroup">
+            <label>Spaziatura verticale <span class="value-badge" id="clockSplitGapValue">100</span></label>
+            <input type="range" id="clockSplitGapRange" min="0" max="100" value="100" data-center="100" />
+            <p class="hint-text">100 &egrave; la spaziatura normale tra la riga delle ore e quella dei minuti; scendendo si avvicinano fino a toccarsi a 0.</p>
+          </div>
+
           <div class="field-group">
             <label class="checkbox-row">
               <input type="checkbox" id="clockSplitEnabledCheck" />
               <span>Colore/grassetto/posizione separati per ore e minuti</span>
             </label>
-            <p class="hint-text">Font, dimensione, contorno e alone restano quelli impostati sopra: qui si sceglie solo colore, grassetto, disposizione e se stare sopra o sotto il soggetto ritagliato, per le ore e per i minuti separatamente.</p>
+            <p class="hint-text">Font, dimensione, contorno e alone restano quelli impostati sopra: qui si sceglie solo colore, grassetto e se stare sopra o sotto il soggetto ritagliato, per le ore e per i minuti separatamente.</p>
           </div>
           <div class="field-group hidden" id="clockSplitGroup">
-            <div class="field-group">
-              <label for="clockSplitArrangementSelect">Disposizione</label>
-              <select id="clockSplitArrangementSelect">
-                <option value="horizontal">Orizzontale &middot; ore a sinistra, minuti a destra</option>
-                <option value="vertical">Verticale &middot; ore sopra, minuti sotto</option>
-              </select>
-              <p class="hint-text">Ore e minuti restano sempre un unico blocco: si trascinano, ruotano e posizionano solo insieme, mai separatamente. Con la disposizione verticale i puntini centrali non sono disponibili, perche' le due righe li rendono superflui.</p>
-            </div>
-
-            <div class="field-group hidden" id="clockSplitGapGroup">
-              <label>Spaziatura verticale <span class="value-badge" id="clockSplitGapValue">0</span></label>
-              <input type="range" id="clockSplitGapRange" min="-60" max="300" value="0" data-center="0" />
-              <p class="hint-text">Distanza tra la riga delle ore e quella dei minuti, in aggiunta a quella normale.</p>
-            </div>
-
             <!-- Un solo segmented control ("Ore"/"Minuti") seleziona a quale delle
                  due si riferiscono colore, grassetto e posizione qui sotto: evita di
                  duplicare due volte lo stesso gruppo di controlli, uno per le ore e

@@ -93,7 +93,8 @@ data class TextLayerConfig(
  *  singolarmente. "arrangement" sceglie la disposizione RECIPROCA di ore e
  *  minuti dentro quel blocco: "horizontal" = ore a sinistra, minuti a destra
  *  (comportamento di sempre); "vertical" = ore sopra, minuti sotto, con
- *  "verticalGap" a regolarne la distanza aggiuntiva. */
+ *  "verticalGap" a regolarne la distanza. "arrangement" e' disponibile anche
+ *  ad "enabled" spento: solo colore/grassetto/passaggio richiedono "enabled". */
 data class ClockSplitConfig(
     val enabled: Boolean,
     val hourColor: String,
@@ -103,7 +104,7 @@ data class ClockSplitConfig(
     val hourLayer: String,   // "back" (sotto al soggetto) | "front" (sopra)
     val minuteLayer: String,
     val arrangement: String, // "horizontal" | "vertical", condiviso da ore e minuti
-    val verticalGap: Float = 0f // px @1080, extra distanza tra ore e minuti in disposizione verticale
+    val verticalGap: Float = 100f // 0..100: 100 = spaziatura normale, 0 = ore/minuti a contatto
 ) {
     companion object {
         fun fromJson(o: JSONObject?): ClockSplitConfig {
@@ -124,7 +125,7 @@ data class ClockSplitConfig(
                 hourLayer = j.optString("hourLayer", legacyLayer ?: "back"),
                 minuteLayer = j.optString("minuteLayer", legacyLayer ?: "back"),
                 arrangement = j.optString("arrangement", "horizontal"),
-                verticalGap = j.optDouble("verticalGap", 0.0).toFloat()
+                verticalGap = j.optDouble("verticalGap", 100.0).toFloat().coerceIn(0f, 100f)
             )
         }
 
@@ -134,7 +135,7 @@ data class ClockSplitConfig(
             minuteColor = "#ffffff", minuteBold = false,
             hourLayer = "back", minuteLayer = "back",
             arrangement = "horizontal",
-            verticalGap = 0f
+            verticalGap = 100f
         )
     }
 }
