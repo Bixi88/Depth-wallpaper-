@@ -278,14 +278,13 @@ class DepthWallpaperService : WallpaperService() {
             val delay = 60_000L - (now % 60_000L) + 50L
             handler.postDelayed(drawRunnable, delay)
         }
-
-        companion object {
-            /** ~30 fps: alla velocita' di caduta misurata sul riferimento
-             *  (~2000px/s @1080) un frame ogni goccia si sposta quasi quanto e'
-             *  lunga, quindi sotto i 30 fps il movimento comincia a vedersi "a
-             *  scatti". Resta comunque ben sotto un vero 60 fps, per contenere
-             *  il consumo di batteria. */
-            private const val RAIN_FRAME_INTERVAL_MS = 33L
-        }
     }
 }
+
+/** ~30 fps: alla velocita' di caduta misurata sul riferimento (~2000px/s @1080)
+ *  un frame ogni goccia si sposta quasi quanto e' lunga, quindi sotto i 30 fps
+ *  il movimento comincia a vedersi "a scatti". Resta comunque ben sotto un vero
+ *  60 fps, per contenere il consumo di batteria.
+ *  (Costante a livello di file: un "companion object" non e' permesso dentro
+ *  una inner class come DepthEngine - era la causa del build fallito.) */
+private const val RAIN_FRAME_INTERVAL_MS = 33L
