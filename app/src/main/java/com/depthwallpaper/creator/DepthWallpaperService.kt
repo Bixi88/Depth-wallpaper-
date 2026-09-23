@@ -119,7 +119,13 @@ class DepthWallpaperService : WallpaperService() {
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
+            // Su molti dispositivi Samsung la lockscreen crea la superficie senza
+            // mai chiamare onVisibilityChanged(true): senza questa riga il flag
+            // "visible" restava false e scheduleNextFrame() usciva subito,
+            // lasciando la pioggia ferma sul primo frame.
+            visible = true
             drawFrame()
+            scheduleNextFrame()
         }
 
         override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -132,6 +138,7 @@ class DepthWallpaperService : WallpaperService() {
             if (forceScreenSizedSurface(holder)) return
             requestHighFrameRate(holder)
             drawFrame()
+            scheduleNextFrame()
         }
 
         /**
