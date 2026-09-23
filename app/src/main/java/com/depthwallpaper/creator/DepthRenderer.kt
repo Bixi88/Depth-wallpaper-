@@ -113,7 +113,14 @@ object DepthRenderer {
         val angleRad = Math.toRadians(4.0) // quasi verticale, come nel riferimento
         val dx = kotlin.math.sin(angleRad).toFloat()
         val dy = kotlin.math.cos(angleRad).toFloat()
-        val t = timeMs / 1000f
+        // BUG CORRETTO: "timeMs / 1000f" con Float (32 bit) perdeva completamente la
+        // precisione su un timestamp epoch (~1,76 miliardi di secondi) - un secondo
+        // di differenza spariva nell'arrotondamento, quindi la pioggia restava
+        // congelata per minuti interi indipendentemente da quanto spesso si
+        // ridisegnava. Con Double (53 bit di mantissa) il timestamp resta esatto;
+        // si torna a Float solo dopo il modulo qui sotto, quando il numero e' gia'
+        // piccolo (0..travel, poche migliaia) e Float non perde piu' nulla.
+        val t = timeMs / 1000.0
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         paint.strokeWidth = (1.6f * k).coerceAtLeast(1f)
@@ -131,9 +138,10 @@ object DepthRenderer {
             val len = lenBase * k
             // 2000 px/s @1080 = velocita' misurata sul video di riferimento
             // (una goccia percorreva ~65px ogni 33ms tracciandola frame a frame).
-            val fallSpeed = 2000f * k * speed * speedFactor // px/s
-            val travel = h + len
-            val d = ((t * fallSpeed + phase * travel) % travel + travel) % travel
+            val fallSpeed = 2000.0 * k * speed * speedFactor // px/s, Double
+            val travel = (h + len).toDouble()
+            val dRaw = (t * fallSpeed + phase * travel) % travel
+            val d = ((dRaw + travel) % travel).toFloat() // qui e' sicuro tornare a Float
             val yTop = d - len
             val x = xFrac * w
 
