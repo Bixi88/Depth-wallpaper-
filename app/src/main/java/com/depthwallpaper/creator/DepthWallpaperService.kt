@@ -7,9 +7,11 @@ import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
+import android.view.Surface
 import android.view.SurfaceHolder
 import androidx.core.content.ContextCompat
 
@@ -128,7 +130,29 @@ class DepthWallpaperService : WallpaperService() {
             // callback onSurfaceChanged con le dimensioni corrette, quindi si esce
             // subito senza disegnare con le dimensioni sbagliate.
             if (forceScreenSizedSurface(holder)) return
+            requestHighFrameRate(holder)
             drawFrame()
+        }
+
+        /**
+         * Su schermi a refresh rate adattivo (es. Samsung LTPO) il sistema decide
+         * da solo quanto spesso "svegliare" la superficie in base a quanto sembra
+         * cambiare: senza dichiarare esplicitamente che serve un frame rate alto,
+         * una superficie che sulla lockscreen appare per lo piu' statica puo'
+         * ricevere aggiornamenti reali molto piu' radi di quanto il codice li
+         * richieda (e' quello che succedeva con la pioggia: il loop a 30 fps
+         * girava, ma la superficie veniva ricomposta molto piu' di rado). Questa
+         * chiamata e' il modo standard (API 30+) per chiedere al sistema di non
+         * limitare la superficie in questo modo.
+         */
+        private fun requestHighFrameRate(holder: SurfaceHolder) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+            try {
+                holder.surface?.setFrameRate(120f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+            } catch (e: Throwable) {
+                // Alcune superfici/dispositivi non lo supportano: si ignora, il
+                // wallpaper funziona comunque, solo senza il boost del refresh rate.
+            }
         }
 
         override fun onDesiredSizeChanged(desiredWidth: Int, desiredHeight: Int) {
