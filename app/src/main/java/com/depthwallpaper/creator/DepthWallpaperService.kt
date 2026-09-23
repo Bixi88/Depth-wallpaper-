@@ -291,6 +291,17 @@ class DepthWallpaperService : WallpaperService() {
         // ---------------------------------------------------------------------------
         // Disegno
         // ---------------------------------------------------------------------------
+        // DIAGNOSTICA TEMPORANEA: contatore di frame disegnato in alto a sinistra,
+        // per vedere ad occhio (senza adb) se il loop gira davvero o si blocca.
+        // Da togliere una volta confermato che la pioggia si muove.
+        private var debugFrameCount = 0
+        private val debugPaint = Paint().apply {
+            color = Color.MAGENTA
+            textSize = 42f
+            isFakeBoldText = true
+            setShadowLayer(6f, 0f, 0f, Color.BLACK)
+        }
+
         private fun drawFrame() {
             val holder = surfaceHolder ?: return
             var canvas: Canvas? = null
@@ -302,6 +313,11 @@ class DepthWallpaperService : WallpaperService() {
                         // Scala dei testi ancorata alla larghezza reale dello schermo,
                         // cosi' l'orologio esce delle stesse proporzioni dell'anteprima.
                         scaleReferenceWidth = resources.displayMetrics.widthPixels
+                    )
+                    debugFrameCount++
+                    canvas.drawText(
+                        "frame=$debugFrameCount visible=$visible rain=${config.rain.enabled} preview=${isPreview}",
+                        20f, 80f, debugPaint
                     )
                 }
             } catch (e: Throwable) {
