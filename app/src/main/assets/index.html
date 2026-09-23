@@ -444,6 +444,23 @@
             <input type="range" id="dimRange" min="0" max="100" value="0" data-center="0" />
           </div>
 
+          <div class="field-group section-title">Effetti</div>
+          <div class="field-group">
+            <label class="checkbox-row">
+              <input type="checkbox" id="rainEnabledCheck" />
+              <span>Pioggia</span>
+            </label>
+            <p class="hint-text">Righe di pioggia animate sopra tutta la scena. Consuma un po' pi&ugrave; batteria perch&eacute; richiede un ridisegno continuo finch&eacute; lo sfondo &egrave; visibile.</p>
+          </div>
+          <div class="field-group hidden" id="rainOptionsGroup">
+            <label>Intensit&agrave; <span class="value-badge" id="rainIntensityValue">50%</span></label>
+            <input type="range" id="rainIntensityRange" min="0" max="100" value="50" data-center="50" />
+          </div>
+          <div class="field-group hidden" id="rainSpeedGroup">
+            <label>Velocit&agrave; <span class="value-badge" id="rainSpeedValue">100%</span></label>
+            <input type="range" id="rainSpeedRange" min="20" max="250" value="100" data-center="100" />
+          </div>
+
           <div class="field-group">
             <label class="checkbox-row">
               <input type="checkbox" id="linkFgCheck" />

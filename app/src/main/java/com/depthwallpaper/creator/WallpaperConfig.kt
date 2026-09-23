@@ -162,6 +162,30 @@ data class DateConfig(
     val style: TextLayerConfig
 )
 
+/** Pioggia animata: overlay di righe sottili che cadono sopra tutta la scena
+ *  (sfondo, testi e soggetto ritagliato). "intensity" controlla quante gocce
+ *  sono visibili contemporaneamente, "speed" la velocita' di caduta (1 =
+ *  normale). Richiede un ridisegno continuo finche' il wallpaper e' visibile,
+ *  quindi e' spenta di default per non consumare batteria extra. */
+data class RainConfig(
+    val enabled: Boolean,
+    val intensity: Float, // 0..1
+    val speed: Float      // moltiplicatore, tipicamente 0.2..2.5
+) {
+    companion object {
+        fun fromJson(o: JSONObject?): RainConfig {
+            val j = o ?: JSONObject()
+            return RainConfig(
+                enabled = j.optBoolean("enabled", false),
+                intensity = j.optDouble("intensity", 0.5).toFloat().coerceIn(0f, 1f),
+                speed = j.optDouble("speed", 1.0).toFloat().coerceIn(0.2f, 2.5f)
+            )
+        }
+
+        fun default() = RainConfig(enabled = false, intensity = 0.5f, speed = 1f)
+    }
+}
+
 data class WallpaperConfig(
     val clock: ClockConfig,
     val date: DateConfig,
@@ -174,7 +198,8 @@ data class WallpaperConfig(
     val fgOffX: Float,
     val fgOffY: Float,
     /** Se true, zoom/spostamento/rotazione dello sfondo trascinano anche il soggetto. */
-    val linkFgToBg: Boolean
+    val linkFgToBg: Boolean,
+    val rain: RainConfig = RainConfig.default()
 ) {
     companion object {
 
@@ -191,7 +216,8 @@ data class WallpaperConfig(
             ),
             bgDim = 0f, bgScale = 1f, bgOffX = 0f, bgOffY = 0f, bgRotation = 0f,
             fgScale = 1f, fgOffX = 0f, fgOffY = 0f,
-            linkFgToBg = false
+            linkFgToBg = false,
+            rain = RainConfig.default()
         )
 
         fun fromJson(json: String?): WallpaperConfig {
@@ -229,7 +255,8 @@ data class WallpaperConfig(
                     fgScale = root.optDouble("fgScale", 1.0).toFloat(),
                     fgOffX = root.optDouble("fgOffX", 0.0).toFloat(),
                     fgOffY = root.optDouble("fgOffY", 0.0).toFloat(),
-                    linkFgToBg = root.optBoolean("linkFgToBg", false)
+                    linkFgToBg = root.optBoolean("linkFgToBg", false),
+                    rain = RainConfig.fromJson(root.optJSONObject("rain"))
                 )
             } catch (e: Throwable) {
                 default()

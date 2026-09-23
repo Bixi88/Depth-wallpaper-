@@ -45,7 +45,11 @@ object DepthRenderer {
          * piu' larga (launcher con sfondo scorrevole) e usarla renderebbe i testi
          * di una dimensione diversa da quella vista nell'anteprima.
          */
-        scaleReferenceWidth: Int = width
+        scaleReferenceWidth: Int = width,
+        /** Istante usato per animare la pioggia. Passato esplicitamente (invece di
+         *  leggere l'orologio di sistema dentro render()) cosi' la funzione resta
+         *  facile da testare e coerente se richiamata piu' volte nello stesso frame. */
+        timeMs: Long = System.currentTimeMillis()
     ) {
         val w = width.toFloat()
         val h = height.toFloat()
@@ -84,6 +88,58 @@ object DepthRenderer {
 
         if (config.clock.enabled) {
             drawClockLayer(canvas, w, h, k, config.clock, pass = "front")
+        }
+
+        if (config.rain.enabled) {
+            drawRain(canvas, w, h, k, config.rain, timeMs)
+        }
+    }
+
+    /**
+     * Pioggia animata: overlay di righe sottili semi-trasparenti che cadono in
+     * diagonale su TUTTA la scena (sopra sfondo, testi e soggetto), come nel
+     * riferimento. Le caratteristiche di ogni goccia (posizione x, lunghezza,
+     * velocita' relativa, sfasamento) sono generate con un seme fisso: restano
+     * identiche a ogni frame, e a cambiare e' solo la posizione verticale in
+     * base a "timeMs" - questo evita di dover conservare uno stato tra un
+     * render() e l'altro (il renderer resta stateless, coerente col resto).
+     */
+    private fun drawRain(canvas: Canvas, w: Float, h: Float, k: Float, rain: RainConfig, timeMs: Long) {
+        val intensity = rain.intensity.coerceIn(0f, 1f)
+        val count = (40 + intensity * 260f).toInt()
+        if (count <= 0) return
+
+        val speed = if (rain.speed > 0f) rain.speed else 1f
+        val angleRad = Math.toRadians(4.0) // quasi verticale, come nel riferimento
+        val dx = kotlin.math.sin(angleRad).toFloat()
+        val dy = kotlin.math.cos(angleRad).toFloat()
+        val t = timeMs / 1000f
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        paint.strokeWidth = (1.6f * k).coerceAtLeast(1f)
+        paint.strokeCap = Paint.Cap.ROUND
+
+        // Seme fisso: stessa sequenza di gocce a ogni chiamata (vedi commento sopra).
+        val rnd = java.util.Random(1337L)
+        for (i in 0 until count) {
+            val xFrac = rnd.nextFloat()
+            val lenBase = 26f + rnd.nextFloat() * 46f
+            val speedFactor = 0.6f + rnd.nextFloat() * 0.8f
+            val phase = rnd.nextFloat()
+            val alpha = 60 + rnd.nextInt(90)
+
+            val len = lenBase * k
+            // 2000 px/s @1080 = velocita' misurata sul video di riferimento
+            // (una goccia percorreva ~65px ogni 33ms tracciandola frame a frame).
+            val fallSpeed = 2000f * k * speed * speedFactor // px/s
+            val travel = h + len
+            val d = ((t * fallSpeed + phase * travel) % travel + travel) % travel
+            val yTop = d - len
+            val x = xFrac * w
+
+            paint.color = Color.WHITE
+            paint.alpha = alpha
+            canvas.drawLine(x, yTop, x + dx * len, yTop + dy * len, paint)
         }
     }
 

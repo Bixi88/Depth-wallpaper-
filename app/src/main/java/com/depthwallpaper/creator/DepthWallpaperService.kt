@@ -41,7 +41,7 @@ class DepthWallpaperService : WallpaperService() {
 
         private val drawRunnable = Runnable {
             drawFrame()
-            scheduleNextMinuteTick()
+            scheduleNextFrame()
         }
 
         private val configReceiver = object : BroadcastReceiver() {
@@ -49,6 +49,11 @@ class DepthWallpaperService : WallpaperService() {
                 try {
                     reloadConfigAndBitmaps()
                     drawFrame()
+                    // La configurazione appena arrivata puo' aver acceso o spento la
+                    // pioggia: senza questa chiamata, attivandola da app mentre il
+                    // wallpaper e' gia' visibile, si resterebbe agganciati al vecchio
+                    // tick al minuto invece di passare al loop continuo (o viceversa).
+                    scheduleNextFrame()
                 } catch (e: Throwable) {
                     // mai propagare: il servizio deve restare vivo
                 }
@@ -104,7 +109,7 @@ class DepthWallpaperService : WallpaperService() {
             if (isVisible) {
                 reloadConfigAndBitmaps()
                 drawFrame()
-                scheduleNextMinuteTick()
+                scheduleNextFrame()
             } else {
                 handler.removeCallbacks(drawRunnable)
             }
@@ -249,16 +254,38 @@ class DepthWallpaperService : WallpaperService() {
             }
         }
 
-        /** Ridisegna all'inizio del minuto successivo: minimo consumo di batteria. */
-        private fun scheduleNextMinuteTick() {
+        /**
+         * Decide il prossimo ridisegno. Con la pioggia attiva serve un loop
+         * continuo (~25 fps: fluido a sufficienza per delle righe che cadono,
+         * senza il costo di un vero 60 fps) per animarla; altrimenti si resta sul
+         * comportamento originale, che ridisegna solo all'inizio del minuto
+         * successivo - il minimo indispensabile per tenere aggiornati orologio e
+         * data, e il piu' parco possibile in termini di batteria.
+         */
+        private fun scheduleNextFrame() {
             handler.removeCallbacks(drawRunnable)
             if (!visible) return
+
+            if (config.rain.enabled) {
+                handler.postDelayed(drawRunnable, RAIN_FRAME_INTERVAL_MS)
+                return
+            }
+
             val needsTick = (config.clock.enabled && config.clock.mode == "time") || config.date.enabled
             if (!needsTick) return
 
             val now = System.currentTimeMillis()
             val delay = 60_000L - (now % 60_000L) + 50L
             handler.postDelayed(drawRunnable, delay)
+        }
+
+        companion object {
+            /** ~30 fps: alla velocita' di caduta misurata sul riferimento
+             *  (~2000px/s @1080) un frame ogni goccia si sposta quasi quanto e'
+             *  lunga, quindi sotto i 30 fps il movimento comincia a vedersi "a
+             *  scatti". Resta comunque ben sotto un vero 60 fps, per contenere
+             *  il consumo di batteria. */
+            private const val RAIN_FRAME_INTERVAL_MS = 33L
         }
     }
 }

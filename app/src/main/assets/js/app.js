@@ -145,6 +145,7 @@
       splitStyle: defaultClockSplit(),
     },
     date: { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.30, false) },
+    rain: { enabled: false, intensity: 0.5, speed: 1 },
   };
 
   const isNative = typeof Android !== "undefined" && Android !== null;
@@ -693,6 +694,64 @@
   }
 
   // ===========================================================================
+  // PIOGGIA
+  // ---------------------------------------------------------------------------
+  // Stessa logica del porting nativo (DepthRenderer.kt/drawRain): righe sottili
+  // semi-trasparenti che cadono in diagonale sopra TUTTA la scena. Le
+  // caratteristiche di ogni goccia (x, lunghezza, velocita' relativa,
+  // sfasamento) vengono da un piccolo generatore pseudo-casuale con seme
+  // fisso, quindi restano identiche a ogni frame: a cambiare e' solo la
+  // posizione verticale, in base al tempo trascorso. Il canvas dell'editor e'
+  // gia' alla larghezza di riferimento (CANVAS_W = 1080), quindi qui non serve
+  // alcun fattore di scala "k" come nel renderer nativo.
+  // ===========================================================================
+  function drawRain(context, w, h, rain, nowMs) {
+    if (!rain || !rain.enabled) return;
+    const intensity = Math.max(0, Math.min(1, rain.intensity));
+    const count = Math.round(40 + intensity * 260);
+    if (count <= 0) return;
+
+    const speed = rain.speed > 0 ? rain.speed : 1;
+    const angleRad = (4 * Math.PI) / 180; // quasi verticale, come nel riferimento
+    const dx = Math.sin(angleRad);
+    const dy = Math.cos(angleRad);
+    const t = nowMs / 1000;
+
+    // Piccolo LCG con seme fisso: stessa sequenza di gocce a ogni chiamata.
+    let seed = 1337;
+    function rnd() {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return (seed % 10000) / 10000;
+    }
+
+    context.save();
+    context.lineCap = "round";
+    context.lineWidth = 1.6;
+    for (let i = 0; i < count; i++) {
+      const xFrac = rnd();
+      const len = 26 + rnd() * 46;
+      const speedFactor = 0.6 + rnd() * 0.8;
+      const phase = rnd();
+      const alpha = (60 + Math.floor(rnd() * 90)) / 255;
+
+      // 2000 px/s @1080 = velocita' misurata sul video di riferimento.
+      const fallSpeed = 2000 * speed * speedFactor;
+      const travel = h + len;
+      const raw = (t * fallSpeed + phase * travel) % travel;
+      const d = raw < 0 ? raw + travel : raw;
+      const yTop = d - len;
+      const x = xFrac * w;
+
+      context.strokeStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
+      context.beginPath();
+      context.moveTo(x, yTop);
+      context.lineTo(x + dx * len, yTop + dy * len);
+      context.stroke();
+    }
+    context.restore();
+  }
+
+  // ===========================================================================
   // RENDER
   // ===========================================================================
   function render(context, w, h) {
@@ -736,6 +795,8 @@
       clockBox = clockBox || frontBox;
     }
 
+    drawRain(context, w, h, state.rain, Date.now());
+
     return { clockBox, dateBox };
   }
 
@@ -749,6 +810,25 @@
   setInterval(() => {
     if (state.clock.mode === "time" || state.date.enabled) renderPreview();
   }, 1000);
+
+  // ---------------------------------------------------------------------------
+  // Con la pioggia attiva l'anteprima ha bisogno di un ridisegno continuo (non
+  // solo una volta al secondo) per animarla: questo loop si avvia da solo
+  // quando "rain.enabled" diventa true e si ferma da solo al frame successivo
+  // in cui la trova spenta, cosi' non consuma nulla quando la pioggia non c'e'.
+  // ---------------------------------------------------------------------------
+  let rainLoopActive = false;
+  function rainLoop() {
+    if (!state.rain.enabled) { rainLoopActive = false; return; }
+    renderPreview();
+    requestAnimationFrame(rainLoop);
+  }
+  function ensureRainLoop() {
+    if (state.rain.enabled && !rainLoopActive) {
+      rainLoopActive = true;
+      requestAnimationFrame(rainLoop);
+    }
+  }
 
   // ===========================================================================
   // TOAST
@@ -1886,26 +1966,66 @@
     // zoom/pan attivi (niente canvas separato da tenere sincronizzato). Si
     // vede anche il segmento (tratteggiato) che chiuderebbe il lazo se si
     // rilasciasse ora, cosi' si capisce subito che forma verra' rasterizzata.
+    //
+    // Stile "luminoso": alone sfumato (shadowBlur) sotto un tratto nitido quasi
+    // bianco, piu' un puntino a cometa sulla punta che segue il dito - stessa
+    // idea vista in altri editor di foto moderni. Tutti gli spessori/raggi sono
+    // divisi per cutoutZoom, come gia' faceva il tratto originale, cosi' lo
+    // spessore percepito a schermo resta costante anche disegnando zoomati.
     if (cutoutLoopPoints && cutoutLoopPoints.length > 0) {
       cutoutCtx.save();
-      cutoutCtx.strokeStyle = "#5ee6c8";
-      cutoutCtx.lineWidth = Math.max(1.5, 2.5 / cutoutZoom);
+      const scale = 1 / cutoutZoom;
+      const glowColor = "rgba(180, 255, 235, 0.95)";
+      const coreColor = "#f4fffb";
+
+      const strokePath = () => {
+        cutoutCtx.beginPath();
+        cutoutCtx.moveTo(cutoutLoopPoints[0].x, cutoutLoopPoints[0].y);
+        for (let i = 1; i < cutoutLoopPoints.length; i++) {
+          cutoutCtx.lineTo(cutoutLoopPoints[i].x, cutoutLoopPoints[i].y);
+        }
+        cutoutCtx.stroke();
+      };
+
       cutoutCtx.lineJoin = "round";
       cutoutCtx.lineCap = "round";
-      cutoutCtx.beginPath();
-      cutoutCtx.moveTo(cutoutLoopPoints[0].x, cutoutLoopPoints[0].y);
-      for (let i = 1; i < cutoutLoopPoints.length; i++) {
-        cutoutCtx.lineTo(cutoutLoopPoints[i].x, cutoutLoopPoints[i].y);
-      }
-      cutoutCtx.stroke();
+
+      // Alone: tratto largo e sfumato sotto a tutto il resto.
+      cutoutCtx.shadowColor = glowColor;
+      cutoutCtx.shadowBlur = 16 * scale;
+      cutoutCtx.strokeStyle = glowColor;
+      cutoutCtx.lineWidth = Math.max(3, 5 * scale);
+      strokePath();
+
+      // Tratto nitido sopra l'alone.
+      cutoutCtx.shadowBlur = 6 * scale;
+      cutoutCtx.strokeStyle = coreColor;
+      cutoutCtx.lineWidth = Math.max(1.8, 2.4 * scale);
+      strokePath();
+
+      // Segmento tratteggiato che anticipa la chiusura del lazo.
       if (cutoutLoopPoints.length > 1) {
-        cutoutCtx.setLineDash([7 / cutoutZoom, 6 / cutoutZoom]);
-        cutoutCtx.lineWidth = Math.max(1, 1.5 / cutoutZoom);
+        cutoutCtx.shadowBlur = 8 * scale;
+        cutoutCtx.strokeStyle = "rgba(244,255,251,0.55)";
+        cutoutCtx.lineWidth = Math.max(1.2, 1.6 * scale);
+        cutoutCtx.setLineDash([7 * scale, 6 * scale]);
         cutoutCtx.beginPath();
-        cutoutCtx.moveTo(cutoutLoopPoints[cutoutLoopPoints.length - 1].x, cutoutLoopPoints[cutoutLoopPoints.length - 1].y);
+        const last = cutoutLoopPoints[cutoutLoopPoints.length - 1];
+        cutoutCtx.moveTo(last.x, last.y);
         cutoutCtx.lineTo(cutoutLoopPoints[0].x, cutoutLoopPoints[0].y);
         cutoutCtx.stroke();
+        cutoutCtx.setLineDash([]);
       }
+
+      // Puntino a cometa sulla punta del tratto, dove si trova il dito ora.
+      const tip = cutoutLoopPoints[cutoutLoopPoints.length - 1];
+      cutoutCtx.shadowColor = glowColor;
+      cutoutCtx.shadowBlur = 14 * scale;
+      cutoutCtx.fillStyle = "#ffffff";
+      cutoutCtx.beginPath();
+      cutoutCtx.arc(tip.x, tip.y, Math.max(4, 6 * scale), 0, Math.PI * 2);
+      cutoutCtx.fill();
+
       cutoutCtx.restore();
     }
   }
@@ -2551,6 +2671,26 @@
   bindRange("dimRange", "dimValue", (v) => { state.bgDim = v; }, (v) => v + "%");
   bindCheck("linkFgCheck", (v) => { state.linkFgToBg = v; });
 
+  // --- pioggia ---
+  const rainEnabledCheck = document.getElementById("rainEnabledCheck");
+  const rainOptionsGroup = document.getElementById("rainOptionsGroup");
+  const rainSpeedGroup = document.getElementById("rainSpeedGroup");
+  function syncRainVisibility() {
+    const on = state.rain.enabled;
+    if (rainOptionsGroup) rainOptionsGroup.classList.toggle("hidden", !on);
+    if (rainSpeedGroup) rainSpeedGroup.classList.toggle("hidden", !on);
+  }
+  if (rainEnabledCheck) {
+    rainEnabledCheck.addEventListener("change", () => {
+      state.rain.enabled = rainEnabledCheck.checked;
+      syncRainVisibility();
+      renderPreview();
+      ensureRainLoop();
+    });
+  }
+  bindRange("rainIntensityRange", "rainIntensityValue", (v) => { state.rain.intensity = v / 100; }, (v) => v + "%");
+  bindRange("rainSpeedRange", "rainSpeedValue", (v) => { state.rain.speed = v / 100; }, (v) => v + "%");
+
   function quickRotate(delta) {
     let next = (state.bg.rotation + delta) % 360;
     if (next > 180) next -= 360;
@@ -2607,6 +2747,7 @@
     state.bgDim = 0;
     state.linkFgToBg = false;
     state.bg.scale = 1; state.bg.offX = 0; state.bg.offY = 0; state.bg.rotation = 0;
+    state.rain = { enabled: false, intensity: 0.5, speed: 1 };
     clearSubject();
 
     document.getElementById("clockEnabledCheck").checked = true;
@@ -2637,6 +2778,11 @@
     setSlider("fgYRange", Math.round(state.fg.offY * 100));
     const link = document.getElementById("linkFgCheck");
     if (link) link.checked = state.linkFgToBg;
+    if (rainEnabledCheck) rainEnabledCheck.checked = state.rain.enabled;
+    setSlider("rainIntensityRange", Math.round(state.rain.intensity * 100));
+    setSlider("rainSpeedRange", Math.round(state.rain.speed * 100));
+    syncRainVisibility();
+    ensureRainLoop();
   }
 
   // ===========================================================================
@@ -2896,6 +3042,11 @@
       fgOffX: state.fg.offX,
       fgOffY: state.fg.offY,
       linkFgToBg: state.linkFgToBg,
+      rain: {
+        enabled: state.rain.enabled,
+        intensity: state.rain.intensity,
+        speed: state.rain.speed,
+      },
     };
   }
 
@@ -2960,6 +3111,16 @@
       state.fg.offX = Number(cfg.fgOffX) || 0;
       state.fg.offY = Number(cfg.fgOffY) || 0;
       state.linkFgToBg = !!cfg.linkFgToBg;
+
+      if (cfg.rain) {
+        state.rain.enabled = !!cfg.rain.enabled;
+        const rIntensity = Number(cfg.rain.intensity);
+        state.rain.intensity = isFinite(rIntensity) ? rIntensity : 0.5;
+        const rSpeed = Number(cfg.rain.speed);
+        state.rain.speed = isFinite(rSpeed) && rSpeed > 0 ? rSpeed : 1;
+      } else {
+        state.rain = { enabled: false, intensity: 0.5, speed: 1 };
+      }
 
       document.getElementById("clockEnabledCheck").checked = state.clock.enabled;
       document.getElementById("clockFormatSelect").value = state.clock.format;
