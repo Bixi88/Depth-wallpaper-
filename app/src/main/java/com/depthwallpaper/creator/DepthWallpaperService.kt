@@ -301,6 +301,7 @@ class DepthWallpaperService : WallpaperService() {
             color = Color.MAGENTA
             textSize = 42f
             isFakeBoldText = true
+            textAlign = Paint.Align.CENTER
             setShadowLayer(6f, 0f, 0f, Color.BLACK)
         }
 
@@ -319,7 +320,7 @@ class DepthWallpaperService : WallpaperService() {
                     debugFrameCount++
                     canvas.drawText(
                         "frame=$debugFrameCount visible=$visible rain=${config.rain.enabled} preview=${isPreview}",
-                        20f, 80f, debugPaint
+                        canvas.width / 2f, canvas.height / 2f, debugPaint
                     )
                 }
             } catch (e: Throwable) {
