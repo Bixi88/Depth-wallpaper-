@@ -158,6 +158,12 @@ class DepthWallpaperService : WallpaperService() {
             // subito senza disegnare con le dimensioni sbagliate.
             if (forceScreenSizedSurface(holder)) return
             requestHighFrameRate(holder)
+            // Stesso motivo di onSurfaceCreated: su lockscreen questo callback puo'
+            // arrivare senza che onVisibilityChanged(true) sia mai stato chiamato
+            // (o dopo che e' rimasto bloccato su false). Senza forzare qui il flag,
+            // scheduleNextFrame() qualche riga sotto uscirebbe subito e la pioggia
+            // resterebbe ferma sul frame appena disegnato.
+            visible = true
             drawFrame()
             scheduleNextFrame()
         }
@@ -211,7 +217,12 @@ class DepthWallpaperService : WallpaperService() {
 
         override fun onSurfaceRedrawNeeded(holder: SurfaceHolder) {
             super.onSurfaceRedrawNeeded(holder)
+            // Stesso motivo di onSurfaceCreated/onSurfaceChanged: se "visible" e'
+            // rimasto bloccato a false, riavviamo qui il loop invece di limitarci
+            // a un singolo drawFrame() che sulla lockscreen sarebbe l'ultimo.
+            visible = true
             drawFrame()
+            scheduleNextFrame()
         }
 
         // ---------------------------------------------------------------------------
