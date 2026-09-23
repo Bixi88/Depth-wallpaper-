@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
+import android.view.Choreographer
 import android.view.Surface
 import android.view.SurfaceHolder
 import androidx.core.content.ContextCompat
@@ -41,9 +42,27 @@ class DepthWallpaperService : WallpaperService() {
         private var bgBitmap: Bitmap? = null
         private var fgBitmap: Bitmap? = null
 
-        private val drawRunnable = Runnable {
+        // Tick "al minuto" per orologio/data quando la pioggia e' spenta: qui va
+        // benissimo un Handler, non serve fluidita' da vsync.
+        private val tickRunnable = Runnable {
             drawFrame()
             scheduleNextFrame()
+        }
+
+        /**
+         * Loop della pioggia allineato al vsync (come nell'app di riferimento
+         * decompilata, che anima correttamente anche in lockscreen): a differenza
+         * di un Handler.postDelayed a intervallo fisso, Choreographer chiede al
+         * compositor un nuovo frame ad ogni refresh reale della superficie, ed e'
+         * il meccanismo che il sistema si aspetta per animazioni legate al
+         * disegno. Si ri-arma da solo finche' "visible" e la pioggia sono attivi.
+         */
+        private val rainFrameCallback = object : Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                if (!visible || !config.rain.enabled) return
+                drawFrame()
+                Choreographer.getInstance().postFrameCallback(this)
+            }
         }
 
         private val configReceiver = object : BroadcastReceiver() {
@@ -94,7 +113,8 @@ class DepthWallpaperService : WallpaperService() {
 
         override fun onDestroy() {
             super.onDestroy()
-            handler.removeCallbacks(drawRunnable)
+            handler.removeCallbacks(tickRunnable)
+            Choreographer.getInstance().removeFrameCallback(rainFrameCallback)
             if (receiverRegistered) {
                 try {
                     applicationContext.unregisterReceiver(configReceiver)
@@ -113,7 +133,8 @@ class DepthWallpaperService : WallpaperService() {
                 drawFrame()
                 scheduleNextFrame()
             } else {
-                handler.removeCallbacks(drawRunnable)
+                handler.removeCallbacks(tickRunnable)
+                Choreographer.getInstance().removeFrameCallback(rainFrameCallback)
             }
         }
 
@@ -287,18 +308,21 @@ class DepthWallpaperService : WallpaperService() {
 
         /**
          * Decide il prossimo ridisegno. Con la pioggia attiva serve un loop
-         * continuo (~25 fps: fluido a sufficienza per delle righe che cadono,
-         * senza il costo di un vero 60 fps) per animarla; altrimenti si resta sul
-         * comportamento originale, che ridisegna solo all'inizio del minuto
-         * successivo - il minimo indispensabile per tenere aggiornati orologio e
-         * data, e il piu' parco possibile in termini di batteria.
+         * continuo per animarla: usa Choreographer (agganciato al vsync reale
+         * della superficie, non un intervallo fisso), lo stesso meccanismo usato
+         * dall'app di riferimento decompilata per animare correttamente anche in
+         * lockscreen. Altrimenti si resta sul comportamento originale, che
+         * ridisegna solo all'inizio del minuto successivo - il minimo
+         * indispensabile per tenere aggiornati orologio e data, e il piu' parco
+         * possibile in termini di batteria.
          */
         private fun scheduleNextFrame() {
-            handler.removeCallbacks(drawRunnable)
+            handler.removeCallbacks(tickRunnable)
+            Choreographer.getInstance().removeFrameCallback(rainFrameCallback)
             if (!visible) return
 
             if (config.rain.enabled) {
-                handler.postDelayed(drawRunnable, RAIN_FRAME_INTERVAL_MS)
+                Choreographer.getInstance().postFrameCallback(rainFrameCallback)
                 return
             }
 
@@ -307,15 +331,7 @@ class DepthWallpaperService : WallpaperService() {
 
             val now = System.currentTimeMillis()
             val delay = 60_000L - (now % 60_000L) + 50L
-            handler.postDelayed(drawRunnable, delay)
+            handler.postDelayed(tickRunnable, delay)
         }
     }
 }
-
-/** ~30 fps: alla velocita' di caduta misurata sul riferimento (~2000px/s @1080)
- *  un frame ogni goccia si sposta quasi quanto e' lunga, quindi sotto i 30 fps
- *  il movimento comincia a vedersi "a scatti". Resta comunque ben sotto un vero
- *  60 fps, per contenere il consumo di batteria.
- *  (Costante a livello di file: un "companion object" non e' permesso dentro
- *  una inner class come DepthEngine - era la causa del build fallito.) */
-private const val RAIN_FRAME_INTERVAL_MS = 33L
