@@ -7,8 +7,6 @@ import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -59,10 +57,24 @@ class DepthWallpaperService : WallpaperService() {
          * il meccanismo che il sistema si aspetta per animazioni legate al
          * disegno. Si ri-arma da solo finche' "visible" e la pioggia sono attivi.
          */
+        private var lastRainDrawNanos = 0L
+
         private val rainFrameCallback = object : Choreographer.FrameCallback {
             override fun doFrame(frameTimeNanos: Long) {
                 if (!visible || !config.rain.enabled) return
-                drawFrame()
+                // Ci si registra a OGNI vsync (e' la parte che tiene vivo il loop
+                // anche sulla lockscreen), ma si disegna davvero solo ogni ~33ms:
+                // ridisegnare l'intera scena - sfondo, soggetto, testi con blur,
+                // pioggia - ad ogni singolo vsync (fino a 120 volte al secondo su
+                // schermi ad alto refresh) e' piu' lavoro di quanto il thread
+                // grafico riesca a smaltire in tempo, e il risultato percepito e'
+                // "a scatti" invece che fluido: il collo di bottiglia non era la
+                // velocita' della pioggia ma il costo del disegno ripetuto troppo
+                // spesso.
+                if (frameTimeNanos - lastRainDrawNanos >= RAIN_FRAME_INTERVAL_NANOS) {
+                    lastRainDrawNanos = frameTimeNanos
+                    drawFrame()
+                }
                 Choreographer.getInstance().postFrameCallback(this)
             }
         }
@@ -293,18 +305,6 @@ class DepthWallpaperService : WallpaperService() {
         // ---------------------------------------------------------------------------
         // Disegno
         // ---------------------------------------------------------------------------
-        // DIAGNOSTICA TEMPORANEA: contatore di frame disegnato in alto a sinistra,
-        // per vedere ad occhio (senza adb) se il loop gira davvero o si blocca.
-        // Da togliere una volta confermato che la pioggia si muove.
-        private var debugFrameCount = 0
-        private val debugPaint = Paint().apply {
-            color = Color.MAGENTA
-            textSize = 42f
-            isFakeBoldText = true
-            textAlign = Paint.Align.CENTER
-            setShadowLayer(6f, 0f, 0f, Color.BLACK)
-        }
-
         private fun drawFrame() {
             val holder = surfaceHolder ?: return
             var canvas: Canvas? = null
@@ -316,11 +316,6 @@ class DepthWallpaperService : WallpaperService() {
                         // Scala dei testi ancorata alla larghezza reale dello schermo,
                         // cosi' l'orologio esce delle stesse proporzioni dell'anteprima.
                         scaleReferenceWidth = resources.displayMetrics.widthPixels
-                    )
-                    debugFrameCount++
-                    canvas.drawText(
-                        "frame=$debugFrameCount visible=$visible rain=${config.rain.enabled} preview=${isPreview}",
-                        canvas.width / 2f, canvas.height / 2f, debugPaint
                     )
                 }
             } catch (e: Throwable) {
@@ -365,3 +360,15 @@ class DepthWallpaperService : WallpaperService() {
         }
     }
 }
+
+/** ~30 fps: alla velocita' di caduta della pioggia (~2000px/s @1080) un frame
+ *  ogni goccia si sposta quasi quanto e' lunga, quindi sotto i 30 fps il
+ *  movimento comincia a vedersi "a scatti". Resta comunque ben sotto un vero
+ *  90/120 fps, per non sovraccaricare il disegno di ogni frame (il vero motivo
+ *  del "non fluido": non la formula della pioggia, ma il costo di ridisegnare
+ *  l'intera scena troppo spesso). Il Choreographer si registra a ogni vsync,
+ *  ma drawFrame() viene chiamata solo quando e' passato almeno questo
+ *  intervallo dall'ultimo disegno.
+ *  (Costante a livello di file: un "companion object" non e' permesso dentro
+ *  una inner class come DepthEngine.) */
+private const val RAIN_FRAME_INTERVAL_NANOS = 33_000_000L
