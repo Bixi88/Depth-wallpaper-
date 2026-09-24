@@ -7,11 +7,13 @@ import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
+import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
 import android.view.Choreographer
+import android.view.Display
 import android.view.Surface
 import android.view.SurfaceHolder
 import androidx.core.content.ContextCompat
@@ -49,31 +51,49 @@ class DepthWallpaperService : WallpaperService() {
             scheduleNextFrame()
         }
 
-        /**
-         * Loop della pioggia allineato al vsync (come nell'app di riferimento
-         * decompilata, che anima correttamente anche in lockscreen): a differenza
-         * di un Handler.postDelayed a intervallo fisso, Choreographer chiede al
-         * compositor un nuovo frame ad ogni refresh reale della superficie, ed e'
-         * il meccanismo che il sistema si aspetta per animazioni legate al
-         * disegno. Si ri-arma da solo finche' "visible" e la pioggia sono attivi.
-         */
-        private var lastRainDrawNanos = 0L
+        // --- Pioggia: stato del loop, cache della scena e misure ---------------------
 
+        private val rainLayer = RainLayer()
+        private val fpsMeter = FpsMeter()
+
+        /** Scena statica (sfondo, velo, testi, soggetto) gia' composta: con la pioggia
+         *  attiva ogni frame la copia e ci disegna sopra solo le gocce, invece di
+         *  ricomporre da zero bitmap a schermo intero e testi con blur a ogni frame.
+         *  Viene rifatta solo se cambiano config/immagini/dimensioni o il minuto. */
+        private var sceneCache: Bitmap? = null
+        private var sceneCacheDirty = true
+        private var sceneCacheMinute = -1L
+
+        // Modalita' di disegno, decisa UNA volta per superficie (mischiare canvas
+        // software e hardware sulla stessa superficie non e' permesso).
+        private var surfaceMode = SURFACE_UNSET
+
+        private var lastRainDrawNanos = 0L
+        private var displayHz = 60f
+        private var maxHz = 60f
+        private var vsyncNanos = 16_666_667L
+
+        /**
+         * Loop della pioggia allineato al vsync. Ci si registra a OGNI vsync ma si
+         * disegna solo quando e' il vsync "giusto" per il frame rate scelto
+         * (config.rain.fps; 0 = ogni vsync).
+         *
+         * Prima la soglia era ESATTAMENTE 33 ms: a 60 Hz due vsync durano 33,3 ms,
+         * quindi bastava un minimo di jitter per alternare frame a 33 e a 50 ms,
+         * che si vede come scatto anche con una media di 30 fps. Ora si sottrae
+         * mezzo vsync (si sceglie il vsync piu' vicino al momento ideale), cosi' il
+         * ritmo resta regolare.
+         */
         private val rainFrameCallback = object : Choreographer.FrameCallback {
             override fun doFrame(frameTimeNanos: Long) {
                 if (!visible || !config.rain.enabled) return
-                // Ci si registra a OGNI vsync (e' la parte che tiene vivo il loop
-                // anche sulla lockscreen), ma si disegna davvero solo ogni ~33ms:
-                // ridisegnare l'intera scena - sfondo, soggetto, testi con blur,
-                // pioggia - ad ogni singolo vsync (fino a 120 volte al secondo su
-                // schermi ad alto refresh) e' piu' lavoro di quanto il thread
-                // grafico riesca a smaltire in tempo, e il risultato percepito e'
-                // "a scatti" invece che fluido: il collo di bottiglia non era la
-                // velocita' della pioggia ma il costo del disegno ripetuto troppo
-                // spesso.
-                if (frameTimeNanos - lastRainDrawNanos >= RAIN_FRAME_INTERVAL_NANOS) {
+                val fps = config.rain.fps
+                val interval = if (fps <= 0) 0L else 1_000_000_000L / fps
+                val since = if (lastRainDrawNanos == 0L) 0L else frameTimeNanos - lastRainDrawNanos
+                val due = lastRainDrawNanos == 0L || since >= interval - vsyncNanos / 2
+                if (due) {
                     lastRainDrawNanos = frameTimeNanos
-                    drawFrame()
+                    drawFrame(frameTimeNanos, since, interval)
                 }
                 Choreographer.getInstance().postFrameCallback(this)
             }
@@ -83,6 +103,7 @@ class DepthWallpaperService : WallpaperService() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 try {
                     reloadConfigAndBitmaps()
+                    surfaceHolder?.let { applyFrameRateHint(it) }
                     drawFrame()
                     // La configurazione appena arrivata puo' aver acceso o spento la
                     // pioggia: senza questa chiamata, attivandola da app mentre il
@@ -99,6 +120,7 @@ class DepthWallpaperService : WallpaperService() {
             super.onCreate(surfaceHolder)
             // Rende disponibili al renderer i font inclusi in assets/fonts.
             DepthRenderer.attach(applicationContext)
+            updateDisplayInfo()
             // FIX posizionamento orologio/data disallineato tra anteprima editor e
             // sfondo reale: senza questo, alcuni launcher (incluso quello di
             // sistema, per lo scorrimento con parallasse tra le home page) chiedono
@@ -138,6 +160,7 @@ class DepthWallpaperService : WallpaperService() {
                 receiverRegistered = false
             }
             releaseBitmaps()
+            releaseSceneCache()
         }
 
         override fun onVisibilityChanged(isVisible: Boolean) {
@@ -154,6 +177,7 @@ class DepthWallpaperService : WallpaperService() {
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
+            surfaceMode = SURFACE_UNSET
             // Su molti dispositivi Samsung la lockscreen crea la superficie senza
             // mai chiamare onVisibilityChanged(true): senza questa riga il flag
             // "visible" restava false e scheduleNextFrame() usciva subito,
@@ -161,6 +185,13 @@ class DepthWallpaperService : WallpaperService() {
             visible = true
             drawFrame()
             scheduleNextFrame()
+        }
+
+        override fun onSurfaceDestroyed(holder: SurfaceHolder) {
+            // La prossima superficie e' un oggetto nuovo: si potra' scegliere di nuovo
+            // se usare il canvas hardware o quello software.
+            surfaceMode = SURFACE_UNSET
+            super.onSurfaceDestroyed(holder)
         }
 
         override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -171,7 +202,8 @@ class DepthWallpaperService : WallpaperService() {
             // callback onSurfaceChanged con le dimensioni corrette, quindi si esce
             // subito senza disegnare con le dimensioni sbagliate.
             if (forceScreenSizedSurface(holder)) return
-            requestHighFrameRate(holder)
+            updateDisplayInfo()
+            applyFrameRateHint(holder)
             // Stesso motivo di onSurfaceCreated: su lockscreen questo callback puo'
             // arrivare senza che onVisibilityChanged(true) sia mai stato chiamato
             // (o dopo che e' rimasto bloccato su false). Senza forzare qui il flag,
@@ -185,21 +217,48 @@ class DepthWallpaperService : WallpaperService() {
         /**
          * Su schermi a refresh rate adattivo (es. Samsung LTPO) il sistema decide
          * da solo quanto spesso "svegliare" la superficie in base a quanto sembra
-         * cambiare: senza dichiarare esplicitamente che serve un frame rate alto,
-         * una superficie che sulla lockscreen appare per lo piu' statica puo'
-         * ricevere aggiornamenti reali molto piu' radi di quanto il codice li
-         * richieda (e' quello che succedeva con la pioggia: il loop a 30 fps
-         * girava, ma la superficie veniva ricomposta molto piu' di rado). Questa
-         * chiamata e' il modo standard (API 30+) per chiedere al sistema di non
-         * limitare la superficie in questo modo.
+         * cambiare: senza dichiarare esplicitamente il frame rate, una superficie
+         * che sulla lockscreen appare per lo piu' statica puo' ricevere aggiornamenti
+         * molto piu' radi di quelli richiesti dal codice. setFrameRate() (API 30+) e'
+         * il modo standard per dirglielo.
+         *
+         * Con la pioggia si dichiara il frame rate scelto nel selettore, ma mai sotto
+         * i 60 (a 30 fps si chiede 60: ogni frame resta a schermo esattamente 2
+         * vsync, ritmo regolare, senza rischiare che il display scenda troppo).
+         * Senza pioggia resta il comportamento di prima (120).
          */
-        private fun requestHighFrameRate(holder: SurfaceHolder) {
+        private fun applyFrameRateHint(holder: SurfaceHolder) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
             try {
-                holder.surface?.setFrameRate(120f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+                val rate = if (config.rain.enabled) {
+                    val fps = config.rain.fps
+                    if (fps <= 0) maxOf(maxHz, 60f) else maxOf(fps.toFloat(), 60f)
+                } else {
+                    120f
+                }
+                holder.surface?.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
             } catch (e: Throwable) {
                 // Alcune superfici/dispositivi non lo supportano: si ignora, il
                 // wallpaper funziona comunque, solo senza il boost del refresh rate.
+            }
+        }
+
+        /** Legge refresh rate attuale e massimo dello schermo (serve a regolare il
+         *  ritmo dei frame e al contatore). Si aggiorna ogni tanto perche' con i
+         *  display adattivi puo' cambiare. */
+        private fun updateDisplayInfo() {
+            try {
+                val dm = this@DepthWallpaperService.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+                val d = dm.getDisplay(Display.DEFAULT_DISPLAY) ?: return
+                val hz = d.refreshRate
+                if (hz > 1f) {
+                    displayHz = hz
+                    vsyncNanos = (1_000_000_000f / hz).toLong()
+                }
+                val top = d.supportedModes.maxOfOrNull { it.refreshRate } ?: hz
+                maxHz = maxOf(top, hz)
+            } catch (e: Throwable) {
+                // si restano i valori di prima (60 Hz)
             }
         }
 
@@ -246,6 +305,8 @@ class DepthWallpaperService : WallpaperService() {
             try {
                 config = WallpaperConfig.fromJson(ConfigStore.loadConfigJson(applicationContext))
                 releaseBitmaps()
+                sceneCacheDirty = true
+                if (!config.rain.enabled && surfaceMode != SURFACE_HW) releaseSceneCache()
                 bgBitmap = decodeIfExists(ConfigStore.bgFile(applicationContext))
                 fgBitmap = decodeIfExists(ConfigStore.fgFile(applicationContext))
             } catch (e: Throwable) {
@@ -305,29 +366,135 @@ class DepthWallpaperService : WallpaperService() {
         // ---------------------------------------------------------------------------
         // Disegno
         // ---------------------------------------------------------------------------
-        private fun drawFrame() {
+        private fun drawFrame(
+            frameTimeNanos: Long = System.nanoTime(),
+            sincePrevDrawNanos: Long = 0L,
+            intervalNanos: Long = 0L
+        ) {
             val holder = surfaceHolder ?: return
+            val startNanos = System.nanoTime()
             var canvas: Canvas? = null
             try {
-                canvas = holder.lockCanvas()
+                canvas = lockFrameCanvas(holder)
                 if (canvas != null) {
-                    DepthRenderer.render(
-                        canvas, canvas.width, canvas.height, config, bgBitmap, fgBitmap,
-                        // Scala dei testi ancorata alla larghezza reale dello schermo,
-                        // cosi' l'orologio esce delle stesse proporzioni dell'anteprima.
-                        scaleReferenceWidth = resources.displayMetrics.widthPixels
-                    )
+                    // Scala dei testi ancorata alla larghezza reale dello schermo,
+                    // cosi' l'orologio esce delle stesse proporzioni dell'anteprima.
+                    val screenW = resources.displayMetrics.widthPixels
+                    if (config.rain.enabled || surfaceMode == SURFACE_HW) {
+                        drawCachedFrame(canvas, canvas.width, canvas.height, screenW, frameTimeNanos)
+                    } else {
+                        DepthRenderer.renderScene(
+                            canvas, canvas.width, canvas.height, config, bgBitmap, fgBitmap,
+                            scaleReferenceWidth = screenW
+                        )
+                    }
                 }
             } catch (e: Throwable) {
                 // superficie non pronta o errore di disegno: salta il frame
             } finally {
                 if (canvas != null) {
                     try {
-                        holder.unlockCanvasAndPost(canvas)
+                        postFrameCanvas(holder, canvas)
                     } catch (e: Throwable) {
                         // no-op
                     }
                 }
+            }
+
+            if (config.rain.enabled) {
+                val now = System.nanoTime()
+                val expected = maxOf(intervalNanos, vsyncNanos)
+                val late = sincePrevDrawNanos > 0L && sincePrevDrawNanos > expected * 3 / 2
+                // A ogni finestra di misura si rilegge anche il refresh dello schermo.
+                if (fpsMeter.onFrame(now, now - startNanos, late)) updateDisplayInfo()
+            }
+        }
+
+        /** Scena in cache + pioggia (+ contatore). */
+        private fun drawCachedFrame(canvas: Canvas, w: Int, h: Int, screenW: Int, frameTimeNanos: Long) {
+            val scene = obtainSceneCache(w, h, screenW)
+            if (scene != null) {
+                canvas.drawBitmap(scene, 0f, 0f, null)
+            } else {
+                // memoria insufficiente per la cache: si ricompone la scena come prima
+                DepthRenderer.renderScene(
+                    canvas, w, h, config, bgBitmap, fgBitmap, scaleReferenceWidth = screenW
+                )
+            }
+            val k = DepthRenderer.scaleFactor(w, screenW)
+            if (config.rain.enabled) {
+                rainLayer.draw(canvas, w.toFloat(), h.toFloat(), k, config.rain, frameTimeNanos / 1_000_000L)
+                if (config.rain.showFps) {
+                    fpsMeter.draw(
+                        canvas, w.toFloat(), h.toFloat(), k,
+                        if (config.rain.fps <= 0) "MAX" else config.rain.fps.toString(),
+                        displayHz,
+                        if (surfaceMode == SURFACE_HW) "GPU" else "CPU"
+                    )
+                }
+            }
+        }
+
+        private fun obtainSceneCache(w: Int, h: Int, screenW: Int): Bitmap? {
+            return try {
+                val minute = System.currentTimeMillis() / 60_000L
+                var b = sceneCache
+                val wrongSize = b == null || b.isRecycled || b.width != w || b.height != h
+                if (wrongSize) {
+                    b?.let { if (!it.isRecycled) it.recycle() }
+                    b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    sceneCache = b
+                }
+                if (wrongSize || sceneCacheDirty || minute != sceneCacheMinute) {
+                    DepthRenderer.renderScene(
+                        Canvas(b!!), w, h, config, bgBitmap, fgBitmap, scaleReferenceWidth = screenW
+                    )
+                    sceneCacheDirty = false
+                    sceneCacheMinute = minute
+                }
+                b
+            } catch (e: Throwable) {
+                sceneCache = null
+                null
+            }
+        }
+
+        private fun releaseSceneCache() {
+            try {
+                sceneCache?.let { if (!it.isRecycled) it.recycle() }
+            } catch (e: Throwable) {
+                // no-op
+            }
+            sceneCache = null
+            sceneCacheDirty = true
+        }
+
+        /** Canvas software (sempre disponibile) o hardware/GPU se scelto nelle
+         *  impostazioni: la scelta e' fatta una volta per superficie. Se il canvas
+         *  hardware non e' disponibile su questo dispositivo si ripiega sul software. */
+        private fun lockFrameCanvas(holder: SurfaceHolder): Canvas? {
+            if (surfaceMode == SURFACE_UNSET) {
+                surfaceMode = if (config.rain.gpu && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    SURFACE_HW
+                } else {
+                    SURFACE_SW
+                }
+            }
+            if (surfaceMode == SURFACE_HW) {
+                try {
+                    return holder.surface.lockHardwareCanvas()
+                } catch (e: Throwable) {
+                    surfaceMode = SURFACE_SW
+                }
+            }
+            return holder.lockCanvas()
+        }
+
+        private fun postFrameCanvas(holder: SurfaceHolder, canvas: Canvas) {
+            if (surfaceMode == SURFACE_HW) {
+                holder.surface.unlockCanvasAndPost(canvas)
+            } else {
+                holder.unlockCanvasAndPost(canvas)
             }
         }
 
@@ -347,6 +514,8 @@ class DepthWallpaperService : WallpaperService() {
             if (!visible) return
 
             if (config.rain.enabled) {
+                lastRainDrawNanos = 0L
+                fpsMeter.reset()
                 Choreographer.getInstance().postFrameCallback(rainFrameCallback)
                 return
             }
@@ -361,14 +530,6 @@ class DepthWallpaperService : WallpaperService() {
     }
 }
 
-/** ~30 fps: alla velocita' di caduta della pioggia (~2000px/s @1080) un frame
- *  ogni goccia si sposta quasi quanto e' lunga, quindi sotto i 30 fps il
- *  movimento comincia a vedersi "a scatti". Resta comunque ben sotto un vero
- *  90/120 fps, per non sovraccaricare il disegno di ogni frame (il vero motivo
- *  del "non fluido": non la formula della pioggia, ma il costo di ridisegnare
- *  l'intera scena troppo spesso). Il Choreographer si registra a ogni vsync,
- *  ma drawFrame() viene chiamata solo quando e' passato almeno questo
- *  intervallo dall'ultimo disegno.
- *  (Costante a livello di file: un "companion object" non e' permesso dentro
- *  una inner class come DepthEngine.) */
-private const val RAIN_FRAME_INTERVAL_NANOS = 33_000_000L
+private const val SURFACE_UNSET = 0
+private const val SURFACE_SW = 1
+private const val SURFACE_HW = 2

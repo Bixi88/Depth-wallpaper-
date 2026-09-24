@@ -170,15 +170,27 @@ data class DateConfig(
 data class RainConfig(
     val enabled: Boolean,
     val intensity: Float, // 0..1
-    val speed: Float      // moltiplicatore, tipicamente 0.2..2.5
+    val speed: Float,     // moltiplicatore, tipicamente 0.2..2.5
+    /** Frame rate obiettivo della pioggia: 30/60/90/120, oppure 0 = "Massimo"
+     *  (si ridisegna a ogni vsync, cioe' al refresh reale dello schermo). */
+    val fps: Int = 60,
+    /** Disegno con canvas hardware (GPU) invece che software: sperimentale, serve
+     *  per arrivare a 90/120 fps. Letto solo quando si crea la superficie. */
+    val gpu: Boolean = false,
+    /** Mostra al centro dello schermo un contatore di FPS/tempi di frame (debug). */
+    val showFps: Boolean = false
 ) {
     companion object {
         fun fromJson(o: JSONObject?): RainConfig {
             val j = o ?: JSONObject()
+            val rawFps = j.optInt("fps", 60)
             return RainConfig(
                 enabled = j.optBoolean("enabled", false),
                 intensity = j.optDouble("intensity", 0.5).toFloat().coerceIn(0f, 1f),
-                speed = j.optDouble("speed", 1.0).toFloat().coerceIn(0.2f, 2.5f)
+                speed = j.optDouble("speed", 1.0).toFloat().coerceIn(0.2f, 2.5f),
+                fps = if (rawFps <= 0) 0 else rawFps.coerceIn(15, 240),
+                gpu = j.optBoolean("gpu", false),
+                showFps = j.optBoolean("showFps", false)
             )
         }
 

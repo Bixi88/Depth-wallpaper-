@@ -32,7 +32,18 @@ object DepthRenderer {
 
     private const val EDITOR_REFERENCE_WIDTH = 1080f
 
-    fun render(
+    /** Scala dei testi/pioggia rispetto alla larghezza di riferimento dell'editor. */
+    fun scaleFactor(width: Int, scaleReferenceWidth: Int = width): Float {
+        val ref = if (scaleReferenceWidth > 0) scaleReferenceWidth.toFloat() else width.toFloat()
+        return ref / EDITOR_REFERENCE_WIDTH
+    }
+
+    // Pioggia usata solo dal percorso "render() completo" (scena + pioggia in un colpo
+    // solo). Il wallpaper usa invece un proprio RainLayer sopra la scena in cache.
+    private val fullRenderRain = RainLayer()
+
+    /** Disegna tutta la scena TRANNE la pioggia (sfondo, velo, testi, soggetto). */
+    fun renderScene(
         canvas: Canvas,
         width: Int,
         height: Int,
@@ -45,15 +56,11 @@ object DepthRenderer {
          * piu' larga (launcher con sfondo scorrevole) e usarla renderebbe i testi
          * di una dimensione diversa da quella vista nell'anteprima.
          */
-        scaleReferenceWidth: Int = width,
-        /** Istante usato per animare la pioggia. Passato esplicitamente (invece di
-         *  leggere l'orologio di sistema dentro render()) cosi' la funzione resta
-         *  facile da testare e coerente se richiamata piu' volte nello stesso frame. */
-        timeMs: Long = System.currentTimeMillis()
+        scaleReferenceWidth: Int = width
     ) {
         val w = width.toFloat()
         val h = height.toFloat()
-        val k = (if (scaleReferenceWidth > 0) scaleReferenceWidth.toFloat() else w) / EDITOR_REFERENCE_WIDTH
+        val k = scaleFactor(width, scaleReferenceWidth)
 
         canvas.drawColor(Color.BLACK)
 
@@ -89,65 +96,27 @@ object DepthRenderer {
         if (config.clock.enabled) {
             drawClockLayer(canvas, w, h, k, config.clock, pass = "front")
         }
-
-        if (config.rain.enabled) {
-            drawRain(canvas, w, h, k, config.rain, timeMs)
-        }
     }
 
-    /**
-     * Pioggia animata: overlay di righe sottili semi-trasparenti che cadono in
-     * diagonale su TUTTA la scena (sopra sfondo, testi e soggetto), come nel
-     * riferimento. Le caratteristiche di ogni goccia (posizione x, lunghezza,
-     * velocita' relativa, sfasamento) sono generate con un seme fisso: restano
-     * identiche a ogni frame, e a cambiare e' solo la posizione verticale in
-     * base a "timeMs" - questo evita di dover conservare uno stato tra un
-     * render() e l'altro (il renderer resta stateless, coerente col resto).
-     */
-    private fun drawRain(canvas: Canvas, w: Float, h: Float, k: Float, rain: RainConfig, timeMs: Long) {
-        val intensity = rain.intensity.coerceIn(0f, 1f)
-        val count = (40 + intensity * 260f).toInt()
-        if (count <= 0) return
-
-        val speed = if (rain.speed > 0f) rain.speed else 1f
-        val angleRad = Math.toRadians(4.0) // quasi verticale, come nel riferimento
-        val dx = kotlin.math.sin(angleRad).toFloat()
-        val dy = kotlin.math.cos(angleRad).toFloat()
-        // BUG CORRETTO: "timeMs / 1000f" con Float (32 bit) perdeva completamente la
-        // precisione su un timestamp epoch (~1,76 miliardi di secondi) - un secondo
-        // di differenza spariva nell'arrotondamento, quindi la pioggia restava
-        // congelata per minuti interi indipendentemente da quanto spesso si
-        // ridisegnava. Con Double (53 bit di mantissa) il timestamp resta esatto;
-        // si torna a Float solo dopo il modulo qui sotto, quando il numero e' gia'
-        // piccolo (0..travel, poche migliaia) e Float non perde piu' nulla.
-        val t = timeMs / 1000.0
-
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        paint.strokeWidth = (1.6f * k).coerceAtLeast(1f)
-        paint.strokeCap = Paint.Cap.ROUND
-
-        // Seme fisso: stessa sequenza di gocce a ogni chiamata (vedi commento sopra).
-        val rnd = java.util.Random(1337L)
-        for (i in 0 until count) {
-            val xFrac = rnd.nextFloat()
-            val lenBase = 26f + rnd.nextFloat() * 46f
-            val speedFactor = 0.6f + rnd.nextFloat() * 0.8f
-            val phase = rnd.nextFloat()
-            val alpha = 60 + rnd.nextInt(90)
-
-            val len = lenBase * k
-            // 2000 px/s @1080 = velocita' misurata sul video di riferimento
-            // (una goccia percorreva ~65px ogni 33ms tracciandola frame a frame).
-            val fallSpeed = 2000.0 * k * speed * speedFactor // px/s, Double
-            val travel = (h + len).toDouble()
-            val dRaw = (t * fallSpeed + phase * travel) % travel
-            val d = ((dRaw + travel) % travel).toFloat() // qui e' sicuro tornare a Float
-            val yTop = d - len
-            val x = xFrac * w
-
-            paint.color = Color.WHITE
-            paint.alpha = alpha
-            canvas.drawLine(x, yTop, x + dx * len, yTop + dy * len, paint)
+    fun render(
+        canvas: Canvas,
+        width: Int,
+        height: Int,
+        config: WallpaperConfig,
+        bg: Bitmap?,
+        fg: Bitmap?,
+        scaleReferenceWidth: Int = width,
+        /** Istante usato per animare la pioggia. Passato esplicitamente (invece di
+         *  leggere l'orologio di sistema dentro render()) cosi' la funzione resta
+         *  facile da testare e coerente se richiamata piu' volte nello stesso frame. */
+        timeMs: Long = System.currentTimeMillis()
+    ) {
+        renderScene(canvas, width, height, config, bg, fg, scaleReferenceWidth)
+        if (config.rain.enabled) {
+            fullRenderRain.draw(
+                canvas, width.toFloat(), height.toFloat(),
+                scaleFactor(width, scaleReferenceWidth), config.rain, timeMs
+            )
         }
     }
 

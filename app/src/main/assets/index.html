@@ -460,6 +460,26 @@
             <label>Velocit&agrave; <span class="value-badge" id="rainSpeedValue">100%</span></label>
             <input type="range" id="rainSpeedRange" min="20" max="250" value="100" data-center="100" />
           </div>
+          <div class="field-group hidden" id="rainFpsGroup">
+            <label for="rainFpsSelect">Fluidit&agrave; (FPS)</label>
+            <select id="rainFpsSelect">
+              <option value="30">30 FPS &middot; risparmio batteria</option>
+              <option value="60" selected>60 FPS &middot; consigliato</option>
+              <option value="90">90 FPS</option>
+              <option value="120">120 FPS</option>
+              <option value="0">Massimo &middot; segue lo schermo</option>
+            </select>
+            <p class="hint-text" id="rainFpsHint">Pi&ugrave; FPS = pioggia pi&ugrave; fluida ma pi&ugrave; batteria. I valori non supportati dallo schermo sono disattivati.</p>
+            <label class="checkbox-row">
+              <input type="checkbox" id="rainGpuCheck" />
+              <span>Accelerazione GPU (sperimentale)</span>
+            </label>
+            <p class="hint-text">Utile per 90/120 FPS. Si applica quando reimposti lo sfondo. Se vedi lo sfondo nero o sfarfallii, disattivala.</p>
+            <label class="checkbox-row">
+              <input type="checkbox" id="rainFpsDebugCheck" />
+              <span>Mostra contatore FPS al centro dello schermo</span>
+            </label>
+          </div>
 
           <div class="field-group">
             <label class="checkbox-row">
