@@ -162,31 +162,52 @@ data class DateConfig(
     val style: TextLayerConfig
 )
 
-/** Pioggia animata: overlay di righe sottili che cadono sopra tutta la scena
- *  (sfondo, testi e soggetto ritagliato). "intensity" controlla quante gocce
- *  sono visibili contemporaneamente, "speed" la velocita' di caduta (1 =
- *  normale). Richiede un ridisegno continuo finche' il wallpaper e' visibile,
- *  quindi e' spenta di default per non consumare batteria extra. */
-data class RainConfig(
-    val enabled: Boolean,
-    val intensity: Float, // 0..1
-    val speed: Float,     // moltiplicatore, tipicamente 0.2..2.5
-    /** Frame rate della pioggia: 60 (default) oppure 30 (risparmio batteria). */
-    val fps: Int = 60
+/** Meteo animato sopra tutta la scena: precipitazione (pioggia o neve, una alla
+ *  volta) e/o nebbia (combinabile con entrambe). "intensity" e' quanta ce n'e'
+ *  (0..1), "speed" la velocita' di caduta (1 = normale). Richiede un ridisegno
+ *  continuo finche' il wallpaper e' visibile, quindi e' spento di default per non
+ *  consumare batteria extra. "fps": 60 (default) oppure 30 (risparmio batteria). */
+data class WeatherConfig(
+    val type: String,          // "none" | "rain" | "snow"
+    val intensity: Float,      // 0..1
+    val speed: Float,          // moltiplicatore, tipicamente 0.2..2.5
+    val fps: Int = 60,
+    val fogEnabled: Boolean = false,
+    val fogIntensity: Float = 0.5f
 ) {
+    val hasPrecipitation: Boolean get() = type == "rain" || type == "snow"
+    /** true se serve il ridisegno continuo (precipitazione e/o nebbia). */
+    val animated: Boolean get() = hasPrecipitation || fogEnabled
+
     companion object {
-        fun fromJson(o: JSONObject?): RainConfig {
-            val j = o ?: JSONObject()
-            return RainConfig(
-                enabled = j.optBoolean("enabled", false),
-                intensity = j.optDouble("intensity", 0.5).toFloat().coerceIn(0f, 1f),
-                speed = j.optDouble("speed", 1.0).toFloat().coerceIn(0.2f, 2.5f),
-                // qualunque valore diverso da 30 (anche config salvate con 90/120) -> 60
-                fps = if (j.optInt("fps", 60) == 30) 30 else 60
-            )
+        private fun cleanType(t: String): String = if (t == "rain" || t == "snow") t else "none"
+        private fun cleanFps(v: Int): Int = if (v == 30) 30 else 60
+
+        /** Legge il nuovo oggetto "weather"; se manca (config salvate prima della
+         *  neve/nebbia) ripiega sul vecchio oggetto "rain". */
+        fun fromJson(weather: JSONObject?, legacyRain: JSONObject?): WeatherConfig {
+            if (weather != null) {
+                return WeatherConfig(
+                    type = cleanType(weather.optString("type", "none")),
+                    intensity = weather.optDouble("intensity", 0.5).toFloat().coerceIn(0f, 1f),
+                    speed = weather.optDouble("speed", 1.0).toFloat().coerceIn(0.2f, 2.5f),
+                    fps = cleanFps(weather.optInt("fps", 60)),
+                    fogEnabled = weather.optBoolean("fogEnabled", false),
+                    fogIntensity = weather.optDouble("fogIntensity", 0.5).toFloat().coerceIn(0f, 1f)
+                )
+            }
+            if (legacyRain != null) {
+                return WeatherConfig(
+                    type = if (legacyRain.optBoolean("enabled", false)) "rain" else "none",
+                    intensity = legacyRain.optDouble("intensity", 0.5).toFloat().coerceIn(0f, 1f),
+                    speed = legacyRain.optDouble("speed", 1.0).toFloat().coerceIn(0.2f, 2.5f),
+                    fps = cleanFps(legacyRain.optInt("fps", 60))
+                )
+            }
+            return default()
         }
 
-        fun default() = RainConfig(enabled = false, intensity = 0.5f, speed = 1f)
+        fun default() = WeatherConfig(type = "none", intensity = 0.5f, speed = 1f)
     }
 }
 
@@ -203,7 +224,7 @@ data class WallpaperConfig(
     val fgOffY: Float,
     /** Se true, zoom/spostamento/rotazione dello sfondo trascinano anche il soggetto. */
     val linkFgToBg: Boolean,
-    val rain: RainConfig = RainConfig.default()
+    val weather: WeatherConfig = WeatherConfig.default()
 ) {
     companion object {
 
@@ -221,7 +242,7 @@ data class WallpaperConfig(
             bgDim = 0f, bgScale = 1f, bgOffX = 0f, bgOffY = 0f, bgRotation = 0f,
             fgScale = 1f, fgOffX = 0f, fgOffY = 0f,
             linkFgToBg = false,
-            rain = RainConfig.default()
+            weather = WeatherConfig.default()
         )
 
         fun fromJson(json: String?): WallpaperConfig {
@@ -260,7 +281,7 @@ data class WallpaperConfig(
                     fgOffX = root.optDouble("fgOffX", 0.0).toFloat(),
                     fgOffY = root.optDouble("fgOffY", 0.0).toFloat(),
                     linkFgToBg = root.optBoolean("linkFgToBg", false),
-                    rain = RainConfig.fromJson(root.optJSONObject("rain"))
+                    weather = WeatherConfig.fromJson(root.optJSONObject("weather"), root.optJSONObject("rain"))
                 )
             } catch (e: Throwable) {
                 default()

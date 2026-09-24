@@ -18,7 +18,7 @@ import android.graphics.Paint
  *  L'alpha e' quindi quantizzato in 5 livelli (differenza invisibile a occhio).
  *
  * Resta senza stato "di animazione": a cambiare da un frame all'altro e' solo
- * la posizione verticale, calcolata dal tempo passato in ingresso.
+ * la posizione verticale, calcolata dal tempo trascorso passato in ingresso.
  */
 class RainLayer {
 
@@ -62,14 +62,18 @@ class RainLayer {
         }
     }
 
-    fun draw(canvas: Canvas, w: Float, h: Float, k: Float, rain: RainConfig, timeMs: Long) {
-        val intensity = rain.intensity.coerceIn(0f, 1f)
-        val count = (40 + intensity * 260f).toInt().coerceIn(0, MAX_DROPS)
+    /**
+     * @param elapsedMs millisecondi trascorsi da quando l'animazione e' (ri)partita:
+     *  a ogni accensione dello schermo si riparte da zero, con tutte le gocce sopra
+     *  il bordo alto che entrano una dopo l'altra.
+     */
+    fun draw(canvas: Canvas, w: Float, h: Float, k: Float, intensity: Float, speed: Float, elapsedMs: Long) {
+        val count = (40 + intensity.coerceIn(0f, 1f) * 260f).toInt().coerceIn(0, MAX_DROPS)
         if (count <= 0) return
 
-        val speed = if (rain.speed > 0f) rain.speed else 1f
-        // Double: un timestamp in Float perderebbe la precisione al secondo.
-        val t = timeMs / 1000.0
+        val spd = if (speed > 0f) speed else 1f
+        // Double: un tempo in Float perderebbe precisione.
+        val t = elapsedMs / 1000.0
 
         paint.strokeWidth = (1.6f * k).coerceAtLeast(1f)
         java.util.Arrays.fill(pointCount, 0)
@@ -77,10 +81,13 @@ class RainLayer {
         for (i in 0 until count) {
             val len = lenBase[i] * k
             // 2000 px/s @1080 = velocita' misurata sul video di riferimento.
-            val fallSpeed = 2000.0 * k * speed * speedFactor[i] // px/s
+            val fallSpeed = 2000.0 * k * spd * speedFactor[i] // px/s
             val travel = (h + len).toDouble()
-            val dRaw = (t * fallSpeed + phase[i] * travel) % travel
-            val d = ((dRaw + travel) % travel).toFloat()
+            // Partenza da zero: la goccia parte sopra lo schermo, sfasata in base a
+            // "phase", e diventa visibile solo quando entra dal bordo alto.
+            val raw = t * fallSpeed - phase[i] * travel
+            if (raw < 0.0) continue
+            val d = (raw % travel).toFloat()
             val yTop = d - len
             val x = xFrac[i] * w
 

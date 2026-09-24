@@ -51,9 +51,17 @@ class DepthWallpaperService : WallpaperService() {
             scheduleNextFrame()
         }
 
-        // --- Pioggia: stato del loop, cache della scena e misure ---------------------
+        // --- Meteo: stato del loop e cache della scena --------------------------------
 
         private val rainLayer = RainLayer()
+        private val snowLayer = SnowLayer()
+        private val fogLayer = FogLayer()
+
+        /** Istante (nanoTime) da cui parte l'animazione meteo. Si azzera quando lo
+         *  schermo si spegne, la superficie viene ricreata o arriva una nuova
+         *  configurazione: al frame successivo si riparte da zero (la neve e la
+         *  pioggia ricominciano a cadere dall'alto, la nebbia riappare piano). */
+        private var animStartNanos = 0L
 
         /** Scena statica (sfondo, velo, testi, soggetto) gia' composta: con la pioggia
          *  attiva ogni frame la copia e ci disegna sopra solo le gocce, invece di
@@ -69,9 +77,9 @@ class DepthWallpaperService : WallpaperService() {
         private var vsyncNanos = 16_666_667L
 
         /**
-         * Loop della pioggia allineato al vsync. Ci si registra a OGNI vsync ma si
+         * Loop del meteo allineato al vsync. Ci si registra a OGNI vsync ma si
          * disegna solo quando e' il vsync "giusto" per il frame rate scelto
-         * (config.rain.fps; 0 = ogni vsync).
+         * (config.weather.fps: 60 o 30).
          *
          * Prima la soglia era ESATTAMENTE 33 ms: a 60 Hz due vsync durano 33,3 ms,
          * quindi bastava un minimo di jitter per alternare frame a 33 e a 50 ms,
@@ -81,8 +89,8 @@ class DepthWallpaperService : WallpaperService() {
          */
         private val rainFrameCallback = object : Choreographer.FrameCallback {
             override fun doFrame(frameTimeNanos: Long) {
-                if (!visible || !config.rain.enabled) return
-                val fps = config.rain.fps
+                if (!visible || !config.weather.animated) return
+                val fps = config.weather.fps
                 val interval = if (fps <= 0) 0L else 1_000_000_000L / fps
                 val since = if (lastRainDrawNanos == 0L) 0L else frameTimeNanos - lastRainDrawNanos
                 val due = lastRainDrawNanos == 0L || since >= interval - vsyncNanos / 2
@@ -156,6 +164,7 @@ class DepthWallpaperService : WallpaperService() {
             }
             releaseBitmaps()
             releaseSceneCache()
+            fogLayer.release()
         }
 
         override fun onVisibilityChanged(isVisible: Boolean) {
@@ -167,11 +176,14 @@ class DepthWallpaperService : WallpaperService() {
             } else {
                 handler.removeCallbacks(tickRunnable)
                 Choreographer.getInstance().removeFrameCallback(rainFrameCallback)
+                // Al prossimo risveglio il meteo riparte da zero.
+                animStartNanos = 0L
             }
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
+            animStartNanos = 0L
             // Su molti dispositivi Samsung la lockscreen crea la superficie senza
             // mai chiamare onVisibilityChanged(true): senza questa riga il flag
             // "visible" restava false e scheduleNextFrame() usciva subito,
@@ -209,14 +221,14 @@ class DepthWallpaperService : WallpaperService() {
          * molto piu' radi di quelli richiesti dal codice. setFrameRate() (API 30+) e'
          * il modo standard per dirglielo.
          *
-         * Con la pioggia si dichiara 60 (anche se si sceglie 30 fps: ogni frame
-         * resta a schermo esattamente 2 vsync, ritmo regolare). Senza pioggia resta
-         * il comportamento di prima (120).
+         * Con il meteo attivo si dichiara 60 (anche se si sceglie 30 fps: ogni
+         * frame resta a schermo esattamente 2 vsync, ritmo regolare). Senza meteo
+         * resta il comportamento di prima (120).
          */
         private fun applyFrameRateHint(holder: SurfaceHolder) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
             try {
-                val rate = if (config.rain.enabled) 60f else 120f
+                val rate = if (config.weather.animated) 60f else 120f
                 holder.surface?.setFrameRate(rate, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
             } catch (e: Throwable) {
                 // Alcune superfici/dispositivi non lo supportano: si ignora, il
@@ -284,7 +296,8 @@ class DepthWallpaperService : WallpaperService() {
                 config = WallpaperConfig.fromJson(ConfigStore.loadConfigJson(applicationContext))
                 releaseBitmaps()
                 sceneCacheDirty = true
-                if (!config.rain.enabled) releaseSceneCache()
+                animStartNanos = 0L
+                if (!config.weather.animated) releaseSceneCache()
                 bgBitmap = decodeIfExists(ConfigStore.bgFile(applicationContext))
                 fgBitmap = decodeIfExists(ConfigStore.fgFile(applicationContext))
             } catch (e: Throwable) {
@@ -353,8 +366,8 @@ class DepthWallpaperService : WallpaperService() {
                     // Scala dei testi ancorata alla larghezza reale dello schermo,
                     // cosi' l'orologio esce delle stesse proporzioni dell'anteprima.
                     val screenW = resources.displayMetrics.widthPixels
-                    if (config.rain.enabled) {
-                        drawRainFrame(canvas, canvas.width, canvas.height, screenW, frameTimeNanos)
+                    if (config.weather.animated) {
+                        drawWeatherFrame(canvas, canvas.width, canvas.height, screenW, frameTimeNanos)
                     } else {
                         DepthRenderer.renderScene(
                             canvas, canvas.width, canvas.height, config, bgBitmap, fgBitmap,
@@ -375,11 +388,11 @@ class DepthWallpaperService : WallpaperService() {
             }
 
             // Ogni tanto si rilegge il refresh dello schermo (display adattivi).
-            if (config.rain.enabled && ++drawnFrames % 120 == 0) updateDisplayInfo()
+            if (config.weather.animated && ++drawnFrames % 120 == 0) updateDisplayInfo()
         }
 
-        /** Scena in cache + pioggia. */
-        private fun drawRainFrame(canvas: Canvas, w: Int, h: Int, screenW: Int, frameTimeNanos: Long) {
+        /** Scena in cache + nebbia + precipitazione. */
+        private fun drawWeatherFrame(canvas: Canvas, w: Int, h: Int, screenW: Int, frameTimeNanos: Long) {
             val scene = obtainSceneCache(w, h, screenW)
             if (scene != null) {
                 canvas.drawBitmap(scene, 0f, 0f, null)
@@ -390,7 +403,17 @@ class DepthWallpaperService : WallpaperService() {
                 )
             }
             val k = DepthRenderer.scaleFactor(w, screenW)
-            rainLayer.draw(canvas, w.toFloat(), h.toFloat(), k, config.rain, frameTimeNanos / 1_000_000L)
+            if (animStartNanos == 0L) animStartNanos = frameTimeNanos
+            val elapsedMs = ((frameTimeNanos - animStartNanos) / 1_000_000L).coerceAtLeast(0L)
+            val wf = w.toFloat()
+            val hf = h.toFloat()
+            val wc = config.weather
+            // Ordine: scena -> nebbia -> precipitazione sopra la nebbia.
+            if (wc.fogEnabled) fogLayer.draw(canvas, wf, hf, k, wc.fogIntensity, elapsedMs)
+            when (wc.type) {
+                "rain" -> rainLayer.draw(canvas, wf, hf, k, wc.intensity, wc.speed, elapsedMs)
+                "snow" -> snowLayer.draw(canvas, wf, hf, k, wc.intensity, wc.speed, elapsedMs)
+            }
         }
 
         private fun obtainSceneCache(w: Int, h: Int, screenW: Int): Bitmap? {
@@ -428,8 +451,8 @@ class DepthWallpaperService : WallpaperService() {
         }
 
         /**
-         * Decide il prossimo ridisegno. Con la pioggia attiva serve un loop
-         * continuo per animarla: usa Choreographer (agganciato al vsync reale
+         * Decide il prossimo ridisegno. Con il meteo attivo serve un loop
+         * continuo per animarlo: usa Choreographer (agganciato al vsync reale
          * della superficie, non un intervallo fisso), lo stesso meccanismo usato
          * dall'app di riferimento decompilata per animare correttamente anche in
          * lockscreen. Altrimenti si resta sul comportamento originale, che
@@ -442,7 +465,7 @@ class DepthWallpaperService : WallpaperService() {
             Choreographer.getInstance().removeFrameCallback(rainFrameCallback)
             if (!visible) return
 
-            if (config.rain.enabled) {
+            if (config.weather.animated) {
                 lastRainDrawNanos = 0L
                 Choreographer.getInstance().postFrameCallback(rainFrameCallback)
                 return

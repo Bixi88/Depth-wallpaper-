@@ -38,11 +38,7 @@ object DepthRenderer {
         return ref / EDITOR_REFERENCE_WIDTH
     }
 
-    // Pioggia usata solo dal percorso "render() completo" (scena + pioggia in un colpo
-    // solo). Il wallpaper usa invece un proprio RainLayer sopra la scena in cache.
-    private val fullRenderRain = RainLayer()
-
-    /** Disegna tutta la scena TRANNE la pioggia (sfondo, velo, testi, soggetto). */
+    /** Disegna tutta la scena, senza gli effetti meteo (sfondo, velo, testi, soggetto). */
     fun renderScene(
         canvas: Canvas,
         width: Int,
@@ -95,28 +91,6 @@ object DepthRenderer {
 
         if (config.clock.enabled) {
             drawClockLayer(canvas, w, h, k, config.clock, pass = "front")
-        }
-    }
-
-    fun render(
-        canvas: Canvas,
-        width: Int,
-        height: Int,
-        config: WallpaperConfig,
-        bg: Bitmap?,
-        fg: Bitmap?,
-        scaleReferenceWidth: Int = width,
-        /** Istante usato per animare la pioggia. Passato esplicitamente (invece di
-         *  leggere l'orologio di sistema dentro render()) cosi' la funzione resta
-         *  facile da testare e coerente se richiamata piu' volte nello stesso frame. */
-        timeMs: Long = System.currentTimeMillis()
-    ) {
-        renderScene(canvas, width, height, config, bg, fg, scaleReferenceWidth)
-        if (config.rain.enabled) {
-            fullRenderRain.draw(
-                canvas, width.toFloat(), height.toFloat(),
-                scaleFactor(width, scaleReferenceWidth), config.rain, timeMs
-            )
         }
     }
 
