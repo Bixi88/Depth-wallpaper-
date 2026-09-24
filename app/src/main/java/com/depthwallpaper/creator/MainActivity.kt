@@ -987,34 +987,6 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        /**
-         * Refresh rate dello schermo: quello attuale e l'elenco di quelli supportati
-         * (alla risoluzione corrente). Serve al selettore FPS della pioggia per non
-         * proporre valori che lo schermo non puo' raggiungere.
-         */
-        @JavascriptInterface
-        fun getSupportedRefreshRates(): String {
-            return try {
-                val dm = getSystemService(android.hardware.display.DisplayManager::class.java)
-                val d = dm.getDisplay(android.view.Display.DEFAULT_DISPLAY)
-                val cur = d.mode
-                val rates = d.supportedModes
-                    .filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
-                    .map { Math.round(it.refreshRate) }
-                    .distinct()
-                    .sorted()
-                val arr = org.json.JSONArray()
-                rates.forEach { arr.put(it) }
-                org.json.JSONObject()
-                    .put("current", Math.round(d.refreshRate))
-                    .put("max", rates.lastOrNull() ?: Math.round(d.refreshRate))
-                    .put("rates", arr)
-                    .toString()
-            } catch (e: Throwable) {
-                "{}"
-            }
-        }
-
         /** Piccola utility per mostrare messaggi nativi (Toast) dal JS, se serve. */
         @JavascriptInterface
         fun showToast(message: String) {

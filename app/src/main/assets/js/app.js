@@ -145,7 +145,7 @@
       splitStyle: defaultClockSplit(),
     },
     date: { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.30, false) },
-    rain: { enabled: false, intensity: 0.5, speed: 1, fps: 60, gpu: false, showFps: false },
+    rain: { enabled: false, intensity: 0.5, speed: 1, fps: 60 },
   };
 
   const isNative = typeof Android !== "undefined" && Android !== null;
@@ -2677,8 +2677,6 @@
   const rainSpeedGroup = document.getElementById("rainSpeedGroup");
   const rainFpsGroup = document.getElementById("rainFpsGroup");
   const rainFpsSelect = document.getElementById("rainFpsSelect");
-  const rainGpuCheck = document.getElementById("rainGpuCheck");
-  const rainFpsDebugCheck = document.getElementById("rainFpsDebugCheck");
   function syncRainVisibility() {
     const on = state.rain.enabled;
     if (rainOptionsGroup) rainOptionsGroup.classList.toggle("hidden", !on);
@@ -2695,30 +2693,7 @@
   }
   bindRange("rainIntensityRange", "rainIntensityValue", (v) => { state.rain.intensity = v / 100; }, (v) => v + "%");
   bindRange("rainSpeedRange", "rainSpeedValue", (v) => { state.rain.speed = v / 100; }, (v) => v + "%");
-  bindSelect("rainFpsSelect", (v) => { state.rain.fps = Math.max(0, parseInt(v, 10) || 0); });
-  bindCheck("rainGpuCheck", (v) => { state.rain.gpu = v; });
-  bindCheck("rainFpsDebugCheck", (v) => { state.rain.showFps = v; });
-
-  // Disattiva nel selettore i frame rate che lo schermo non raggiunge (il valore
-  // "Massimo" resta sempre disponibile). Senza bridge nativo (anteprima nel
-  // browser) non si tocca nulla.
-  (function initRefreshRateOptions() {
-    if (!rainFpsSelect || !isNative || typeof Android.getSupportedRefreshRates !== "function") return;
-    try {
-      const info = JSON.parse(Android.getSupportedRefreshRates() || "{}");
-      const max = Number(info.max) || 0;
-      if (!(max > 0)) return;
-      Array.from(rainFpsSelect.options).forEach((opt) => {
-        const v = parseInt(opt.value, 10);
-        if (v > 0 && v > max + 1) {
-          opt.disabled = true;
-          opt.textContent = v + " FPS \u00b7 non supportato dallo schermo";
-        }
-      });
-      const hint = document.getElementById("rainFpsHint");
-      if (hint) hint.textContent = "Il tuo schermo arriva a " + max + " Hz. Pi\u00f9 FPS = pioggia pi\u00f9 fluida ma pi\u00f9 batteria. Valori che non dividono bene il refresh dello schermo possono risultare meno regolari.";
-    } catch (e) { /* si lasciano tutte le opzioni */ }
-  })();
+  bindSelect("rainFpsSelect", (v) => { state.rain.fps = (parseInt(v, 10) === 30) ? 30 : 60; });
 
   function quickRotate(delta) {
     let next = (state.bg.rotation + delta) % 360;
@@ -2776,7 +2751,7 @@
     state.bgDim = 0;
     state.linkFgToBg = false;
     state.bg.scale = 1; state.bg.offX = 0; state.bg.offY = 0; state.bg.rotation = 0;
-    state.rain = { enabled: false, intensity: 0.5, speed: 1, fps: 60, gpu: false, showFps: false };
+    state.rain = { enabled: false, intensity: 0.5, speed: 1, fps: 60 };
     clearSubject();
 
     document.getElementById("clockEnabledCheck").checked = true;
@@ -2811,8 +2786,6 @@
     setSlider("rainIntensityRange", Math.round(state.rain.intensity * 100));
     setSlider("rainSpeedRange", Math.round(state.rain.speed * 100));
     if (rainFpsSelect) rainFpsSelect.value = String(state.rain.fps);
-    if (rainGpuCheck) rainGpuCheck.checked = !!state.rain.gpu;
-    if (rainFpsDebugCheck) rainFpsDebugCheck.checked = !!state.rain.showFps;
     syncRainVisibility();
     ensureRainLoop();
   }
@@ -3079,8 +3052,6 @@
         intensity: state.rain.intensity,
         speed: state.rain.speed,
         fps: state.rain.fps,
-        gpu: state.rain.gpu,
-        showFps: state.rain.showFps,
       },
     };
   }
@@ -3153,12 +3124,10 @@
         state.rain.intensity = isFinite(rIntensity) ? rIntensity : 0.5;
         const rSpeed = Number(cfg.rain.speed);
         state.rain.speed = isFinite(rSpeed) && rSpeed > 0 ? rSpeed : 1;
-        const rFps = Number(cfg.rain.fps);
-        state.rain.fps = (cfg.rain.fps != null && isFinite(rFps) && rFps >= 0) ? Math.round(rFps) : 60;
-        state.rain.gpu = !!cfg.rain.gpu;
-        state.rain.showFps = !!cfg.rain.showFps;
+        // solo 30 o 60 (config salvate con altri valori -> 60)
+        state.rain.fps = Number(cfg.rain.fps) === 30 ? 30 : 60;
       } else {
-        state.rain = { enabled: false, intensity: 0.5, speed: 1, fps: 60, gpu: false, showFps: false };
+        state.rain = { enabled: false, intensity: 0.5, speed: 1, fps: 60 };
       }
 
       document.getElementById("clockEnabledCheck").checked = state.clock.enabled;
