@@ -145,7 +145,7 @@
       splitStyle: defaultClockSplit(),
     },
     date: { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.30, false) },
-    weather: { type: "none", intensity: 0.5, speed: 1, fps: 60, fogEnabled: false, fogIntensity: 0.5 },
+    weather: { type: "none", intensity: 0.5, speed: 1, fps: 60 },
   };
 
   const isNative = typeof Android !== "undefined" && Android !== null;
@@ -696,7 +696,7 @@
   // ===========================================================================
   // METEO (pioggia, neve, nebbia)
   // ---------------------------------------------------------------------------
-  // Stessa logica del porting nativo (RainLayer.kt / SnowLayer.kt / FogLayer.kt).
+  // Stessa logica del porting nativo (RainLayer.kt / SnowLayer.kt).
   // Le caratteristiche di ogni goccia/fiocco (x, lunghezza, velocita' relativa,
   // sfasamento) vengono da un piccolo generatore pseudo-casuale con seme fisso,
   // quindi restano identiche a ogni frame: a cambiare e' solo la posizione, in
@@ -706,11 +706,9 @@
   // alla larghezza di riferimento (CANVAS_W = 1080), quindi qui non serve alcun
   // fattore di scala "k" come nel renderer nativo.
   // ===========================================================================
-  let weatherStartMs = performance.now();
-  function restartWeather() { weatherStartMs = performance.now(); }
   function weatherActive() {
     const wx = state.weather;
-    return wx.type !== "none" || wx.fogEnabled;
+    return wx.type !== "none";
   }
 
   function drawRain(context, w, h, wx, t) {
@@ -743,9 +741,8 @@
       // 2000 px/s @1080 = velocita' misurata sul video di riferimento.
       const fallSpeed = 2000 * speed * speedFactor;
       const travel = h + len;
-      const raw = t * fallSpeed - phase * travel; // parte sopra lo schermo
-      if (raw < 0) continue;
-      const yTop = (raw % travel) - len;
+      const dRaw = ((t * fallSpeed + phase * travel) % travel + travel) % travel;
+      const yTop = dRaw - len;
       const x = xFrac * w;
 
       context.strokeStyle = `rgba(255,255,255,${alpha.toFixed(3)})`;
@@ -787,9 +784,8 @@
 
       const r = radius[c];
       const travel = h + 2 * r;
-      const raw = t * fall[c] * speed * jitter - phase * travel;
-      if (raw < 0) continue; // non e' ancora entrato dal bordo alto
-      const y = (raw % travel) - r;
+      const dRaw = ((t * fall[c] * speed * jitter + phase * travel) % travel + travel) % travel;
+      const y = dRaw - r;
       const x = xFrac * w + Math.sin(t * swayFreq + swayPhase) * swayAmp[c];
 
       context.fillStyle = `rgba(255,255,255,${alphaOf[c].toFixed(3)})`;
@@ -800,106 +796,13 @@
     context.restore();
   }
 
-  // Nebbia: stessa texture di FogLayer.kt (rumore a valori, 3 ottave, periodico in
-  // orizzontale, stesso generatore) disegnata in 2 strati che scorrono lenti.
-  const FOG_TEX_W = 256;
-  const FOG_TEX_H = 128;
-  const FOG_LAYERS = [
-    { top: 0.38, bottom: 0.80, speed: 14, alphaMul: 0.65, periodMul: 1.7, phase: 0 },
-    { top: 0.62, bottom: 1.02, speed: -24, alphaMul: 0.85, periodMul: 1.3, phase: 0.37 },
-  ];
-  let fogTexture = null;
-  function getFogTexture() {
-    if (fogTexture) return fogTexture;
-    const OCT_X = [4, 8, 16];
-    const OCT_Y = [2, 4, 8];
-    const OCT_AMP = [0.55, 0.30, 0.15];
-
-    let seed = 2024;
-    function rnd() {
-      // Math.imul: stesso risultato dell'aritmetica a 64 bit del codice nativo
-      seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
-      return (seed % 10000) / 10000;
-    }
-    const grids = OCT_X.map((cx, o) => {
-      const rows = [];
-      for (let row = 0; row <= OCT_Y[o]; row++) {
-        const line = [];
-        for (let col = 0; col < cx; col++) line.push(rnd());
-        rows.push(line);
-      }
-      return rows;
-    });
-    const smooth = (f) => f * f * (3 - 2 * f);
-    function sample(grid, cx, cy, u, v) {
-      const gx = u * cx;
-      const gy = v * cy;
-      const x0 = Math.floor(gx) % cx;
-      const x1 = (x0 + 1) % cx; // periodico in orizzontale
-      const y0 = Math.min(cy - 1, Math.max(0, Math.floor(gy)));
-      const y1 = y0 + 1;
-      const fx = smooth(gx - Math.floor(gx));
-      const fy = smooth(gy - Math.floor(gy));
-      const top = grid[y0][x0] * (1 - fx) + grid[y0][x1] * fx;
-      const bottom = grid[y1][x0] * (1 - fx) + grid[y1][x1] * fx;
-      return top * (1 - fy) + bottom * fy;
-    }
-
-    const cv = document.createElement("canvas");
-    cv.width = FOG_TEX_W;
-    cv.height = FOG_TEX_H;
-    const cx2 = cv.getContext("2d");
-    const img = cx2.createImageData(FOG_TEX_W, FOG_TEX_H);
-    for (let y = 0; y < FOG_TEX_H; y++) {
-      const v = (y + 0.5) / FOG_TEX_H;
-      const edge = Math.sin(Math.PI * v);
-      for (let x = 0; x < FOG_TEX_W; x++) {
-        const u = (x + 0.5) / FOG_TEX_W;
-        let sum = 0;
-        for (let o = 0; o < OCT_X.length; o++) sum += OCT_AMP[o] * sample(grids[o], OCT_X[o], OCT_Y[o], u, v);
-        let a = Math.min(1, Math.max(0, (sum - 0.42) / 0.40));
-        a = a * a * (3 - 2 * a) * edge;
-        const i = (y * FOG_TEX_W + x) * 4;
-        img.data[i] = 235;
-        img.data[i + 1] = 240;
-        img.data[i + 2] = 245;
-        img.data[i + 3] = Math.round(a * 255);
-      }
-    }
-    cx2.putImageData(img, 0, 0);
-    fogTexture = cv;
-    return cv;
-  }
-
-  function drawFog(context, w, h, wx, t) {
-    const inten = Math.max(0, Math.min(1, wx.fogIntensity));
-    if (inten <= 0) return;
-    const tex = getFogTexture();
-    const fade = Math.min(1, Math.max(0, t / 1.5)); // dissolvenza in ingresso
-    context.save();
-    for (const L of FOG_LAYERS) {
-      const a = inten * L.alphaMul * fade;
-      if (a <= 0.004) continue;
-      context.globalAlpha = a;
-      const period = w * L.periodMul;
-      const off = (((t * L.speed + L.phase * period) % period) + period) % period;
-      const top = h * L.top;
-      const bottom = h * L.bottom;
-      for (let x = -off; x < w; x += period) {
-        context.drawImage(tex, x, top, period, bottom - top);
-      }
-    }
-    context.restore();
-  }
-
-  // Ordine: nebbia -> precipitazione sopra la nebbia (come nel wallpaper vero).
   function drawWeather(context, w, h, wx, nowMs) {
-    if (!wx || (wx.type === "none" && !wx.fogEnabled)) return;
-    const t = Math.max(0, (nowMs - weatherStartMs) / 1000);
-    if (wx.fogEnabled) drawFog(context, w, h, wx, t);
+    if (!wx || wx.type === "none") return;
+    const t = nowMs / 1000; // tempo assoluto: continuita' anche a schermo spento/riacceso
     if (wx.type === "rain") drawRain(context, w, h, wx, t);
     else if (wx.type === "snow") drawSnow(context, w, h, wx, t);
   }
+
 
   // ===========================================================================
   // RENDER
@@ -945,7 +848,7 @@
       clockBox = clockBox || frontBox;
     }
 
-    drawWeather(context, w, h, state.weather, performance.now());
+    drawWeather(context, w, h, state.weather, Date.now());
 
     return { clockBox, dateBox };
   }
@@ -964,7 +867,7 @@
   // ---------------------------------------------------------------------------
   // Con un effetto meteo attivo l'anteprima ha bisogno di un ridisegno continuo
   // (non solo una volta al secondo) per animarlo: questo loop si avvia da solo
-  // quando pioggia/neve/nebbia si accendono e si ferma da solo al frame
+  // quando pioggia/neve si accendono e si ferma da solo al frame
   // successivo in cui li trova spenti, cosi' non consuma nulla quando non ci sono.
   // ---------------------------------------------------------------------------
   let rainLoopActive = false;
@@ -2827,31 +2730,17 @@
   const rainSpeedGroup = document.getElementById("rainSpeedGroup");
   const rainFpsGroup = document.getElementById("rainFpsGroup");
   const rainFpsSelect = document.getElementById("rainFpsSelect");
-  const fogEnabledCheck = document.getElementById("fogEnabledCheck");
-  const fogOptionsGroup = document.getElementById("fogOptionsGroup");
   function syncRainVisibility() {
     const wx = state.weather;
     const precip = wx.type !== "none";
-    const active = precip || wx.fogEnabled;
     if (rainOptionsGroup) rainOptionsGroup.classList.toggle("hidden", !precip);
     if (rainSpeedGroup) rainSpeedGroup.classList.toggle("hidden", !precip);
-    if (fogOptionsGroup) fogOptionsGroup.classList.toggle("hidden", !wx.fogEnabled);
-    if (rainFpsGroup) rainFpsGroup.classList.toggle("hidden", !active);
+    if (rainFpsGroup) rainFpsGroup.classList.toggle("hidden", !precip);
   }
   if (weatherTypeSelect) {
     weatherTypeSelect.addEventListener("change", () => {
       const v = weatherTypeSelect.value;
       state.weather.type = (v === "rain" || v === "snow") ? v : "none";
-      restartWeather();
-      syncRainVisibility();
-      renderPreview();
-      ensureRainLoop();
-    });
-  }
-  if (fogEnabledCheck) {
-    fogEnabledCheck.addEventListener("change", () => {
-      state.weather.fogEnabled = fogEnabledCheck.checked;
-      restartWeather();
       syncRainVisibility();
       renderPreview();
       ensureRainLoop();
@@ -2859,7 +2748,6 @@
   }
   bindRange("rainIntensityRange", "rainIntensityValue", (v) => { state.weather.intensity = v / 100; }, (v) => v + "%");
   bindRange("rainSpeedRange", "rainSpeedValue", (v) => { state.weather.speed = v / 100; }, (v) => v + "%");
-  bindRange("fogIntensityRange", "fogIntensityValue", (v) => { state.weather.fogIntensity = v / 100; }, (v) => v + "%");
   bindSelect("rainFpsSelect", (v) => { state.weather.fps = (parseInt(v, 10) === 30) ? 30 : 60; });
 
   function quickRotate(delta) {
@@ -2918,7 +2806,7 @@
     state.bgDim = 0;
     state.linkFgToBg = false;
     state.bg.scale = 1; state.bg.offX = 0; state.bg.offY = 0; state.bg.rotation = 0;
-    state.weather = { type: "none", intensity: 0.5, speed: 1, fps: 60, fogEnabled: false, fogIntensity: 0.5 };
+    state.weather = { type: "none", intensity: 0.5, speed: 1, fps: 60 };
     clearSubject();
 
     document.getElementById("clockEnabledCheck").checked = true;
@@ -2953,9 +2841,6 @@
     setSlider("rainIntensityRange", Math.round(state.weather.intensity * 100));
     setSlider("rainSpeedRange", Math.round(state.weather.speed * 100));
     if (rainFpsSelect) rainFpsSelect.value = String(state.weather.fps);
-    if (fogEnabledCheck) fogEnabledCheck.checked = !!state.weather.fogEnabled;
-    setSlider("fogIntensityRange", Math.round(state.weather.fogIntensity * 100));
-    restartWeather();
     syncRainVisibility();
     ensureRainLoop();
   }
@@ -3222,8 +3107,6 @@
         intensity: state.weather.intensity,
         speed: state.weather.speed,
         fps: state.weather.fps,
-        fogEnabled: state.weather.fogEnabled,
-        fogIntensity: state.weather.fogIntensity,
       },
     };
   }
@@ -3300,19 +3183,15 @@
         const sp = numOr(cfg.weather.speed, 1);
         state.weather.speed = sp > 0 ? sp : 1;
         state.weather.fps = Number(cfg.weather.fps) === 30 ? 30 : 60;
-        state.weather.fogEnabled = !!cfg.weather.fogEnabled;
-        state.weather.fogIntensity = Math.min(1, Math.max(0, numOr(cfg.weather.fogIntensity, 0.5)));
       } else if (cfg.rain) {
         state.weather = {
           type: cfg.rain.enabled ? "rain" : "none",
           intensity: Math.min(1, Math.max(0, numOr(cfg.rain.intensity, 0.5))),
           speed: numOr(cfg.rain.speed, 1) > 0 ? numOr(cfg.rain.speed, 1) : 1,
           fps: Number(cfg.rain.fps) === 30 ? 30 : 60,
-          fogEnabled: false,
-          fogIntensity: 0.5,
         };
       } else {
-        state.weather = { type: "none", intensity: 0.5, speed: 1, fps: 60, fogEnabled: false, fogIntensity: 0.5 };
+        state.weather = { type: "none", intensity: 0.5, speed: 1, fps: 60 };
       }
 
       document.getElementById("clockEnabledCheck").checked = state.clock.enabled;

@@ -55,13 +55,6 @@ class DepthWallpaperService : WallpaperService() {
 
         private val rainLayer = RainLayer()
         private val snowLayer = SnowLayer()
-        private val fogLayer = FogLayer()
-
-        /** Istante (nanoTime) da cui parte l'animazione meteo. Si azzera quando lo
-         *  schermo si spegne, la superficie viene ricreata o arriva una nuova
-         *  configurazione: al frame successivo si riparte da zero (la neve e la
-         *  pioggia ricominciano a cadere dall'alto, la nebbia riappare piano). */
-        private var animStartNanos = 0L
 
         /** Scena statica (sfondo, velo, testi, soggetto) gia' composta: con la pioggia
          *  attiva ogni frame la copia e ci disegna sopra solo le gocce, invece di
@@ -164,7 +157,6 @@ class DepthWallpaperService : WallpaperService() {
             }
             releaseBitmaps()
             releaseSceneCache()
-            fogLayer.release()
         }
 
         override fun onVisibilityChanged(isVisible: Boolean) {
@@ -176,14 +168,11 @@ class DepthWallpaperService : WallpaperService() {
             } else {
                 handler.removeCallbacks(tickRunnable)
                 Choreographer.getInstance().removeFrameCallback(rainFrameCallback)
-                // Al prossimo risveglio il meteo riparte da zero.
-                animStartNanos = 0L
             }
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
-            animStartNanos = 0L
             // Su molti dispositivi Samsung la lockscreen crea la superficie senza
             // mai chiamare onVisibilityChanged(true): senza questa riga il flag
             // "visible" restava false e scheduleNextFrame() usciva subito,
@@ -296,7 +285,6 @@ class DepthWallpaperService : WallpaperService() {
                 config = WallpaperConfig.fromJson(ConfigStore.loadConfigJson(applicationContext))
                 releaseBitmaps()
                 sceneCacheDirty = true
-                animStartNanos = 0L
                 if (!config.weather.animated) releaseSceneCache()
                 bgBitmap = decodeIfExists(ConfigStore.bgFile(applicationContext))
                 fgBitmap = decodeIfExists(ConfigStore.fgFile(applicationContext))
@@ -391,7 +379,7 @@ class DepthWallpaperService : WallpaperService() {
             if (config.weather.animated && ++drawnFrames % 120 == 0) updateDisplayInfo()
         }
 
-        /** Scena in cache + nebbia + precipitazione. */
+        /** Scena in cache + precipitazione. */
         private fun drawWeatherFrame(canvas: Canvas, w: Int, h: Int, screenW: Int, frameTimeNanos: Long) {
             val scene = obtainSceneCache(w, h, screenW)
             if (scene != null) {
@@ -403,16 +391,13 @@ class DepthWallpaperService : WallpaperService() {
                 )
             }
             val k = DepthRenderer.scaleFactor(w, screenW)
-            if (animStartNanos == 0L) animStartNanos = frameTimeNanos
-            val elapsedMs = ((frameTimeNanos - animStartNanos) / 1_000_000L).coerceAtLeast(0L)
             val wf = w.toFloat()
             val hf = h.toFloat()
             val wc = config.weather
-            // Ordine: scena -> nebbia -> precipitazione sopra la nebbia.
-            if (wc.fogEnabled) fogLayer.draw(canvas, wf, hf, k, wc.fogIntensity, elapsedMs)
+            val timeMs = frameTimeNanos / 1_000_000L
             when (wc.type) {
-                "rain" -> rainLayer.draw(canvas, wf, hf, k, wc.intensity, wc.speed, elapsedMs)
-                "snow" -> snowLayer.draw(canvas, wf, hf, k, wc.intensity, wc.speed, elapsedMs)
+                "rain" -> rainLayer.draw(canvas, wf, hf, k, wc.intensity, wc.speed, timeMs)
+                "snow" -> snowLayer.draw(canvas, wf, hf, k, wc.intensity, wc.speed, timeMs)
             }
         }
 

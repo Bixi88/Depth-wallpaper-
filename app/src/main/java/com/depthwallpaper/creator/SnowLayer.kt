@@ -14,9 +14,8 @@ import android.graphics.Paint
  * a cambiare e' solo la posizione, calcolata dal tempo trascorso. I fiocchi della
  * stessa taglia si disegnano insieme con una sola drawPoints().
  *
- * Partenza da zero: a ogni (ri)partenza dell'animazione i fiocchi sono tutti sopra
- * il bordo alto e entrano uno dopo l'altro, quindi si vede la neve iniziare a
- * cadere; passati i primi secondi il cielo e' pieno e il ciclo continua.
+ * Tempo assoluto: la neve continua a cadere "da dove sarebbe" anche quando lo
+ * schermo si spegne e si riaccende, senza ripartire da capo.
  */
 class SnowLayer {
 
@@ -41,6 +40,8 @@ class SnowLayer {
     private val points = Array(CLASSES) { FloatArray(MAX_FLAKES * 2) }
     private val pointCount = IntArray(CLASSES)
 
+    
+
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         strokeCap = Paint.Cap.ROUND
         style = Paint.Style.STROKE
@@ -60,12 +61,16 @@ class SnowLayer {
         }
     }
 
-    fun draw(canvas: Canvas, w: Float, h: Float, k: Float, intensity: Float, speed: Float, elapsedMs: Long) {
+    /**
+     * @param timeMs tempo assoluto (es. System.currentTimeMillis()): la caduta e'
+     *  continua, senza ripartire da capo quando lo schermo si spegne e riaccende.
+     */
+    fun draw(canvas: Canvas, w: Float, h: Float, k: Float, intensity: Float, speed: Float, timeMs: Long) {
         val n = (30 + intensity.coerceIn(0f, 1f) * 170f).toInt().coerceIn(0, MAX_FLAKES)
         if (n <= 0) return
 
         val spd = if (speed > 0f) speed else 1f
-        val t = elapsedMs / 1000.0
+        val t = timeMs / 1000.0
         java.util.Arrays.fill(pointCount, 0)
 
         for (i in 0 until n) {
@@ -73,9 +78,8 @@ class SnowLayer {
             val r = radius[c] * k
             val fallSpeed = fallPxPerSec[c].toDouble() * k * spd * speedJitter[i]
             val travel = (h + 2f * r).toDouble()
-            val raw = t * fallSpeed - phase[i] * travel
-            if (raw < 0.0) continue // non e' ancora entrato dal bordo alto
-            val y = ((raw % travel) - r).toFloat()
+            val dRaw = (t * fallSpeed + phase[i] * travel) % travel
+            val y = ((dRaw + travel) % travel - r).toFloat()
             val x = xFrac[i] * w +
                 kotlin.math.sin(t * swayFreq[i] + swayPhase[i]).toFloat() * swayAmp[c] * k
 

@@ -163,21 +163,19 @@ data class DateConfig(
 )
 
 /** Meteo animato sopra tutta la scena: precipitazione (pioggia o neve, una alla
- *  volta) e/o nebbia (combinabile con entrambe). "intensity" e' quanta ce n'e'
- *  (0..1), "speed" la velocita' di caduta (1 = normale). Richiede un ridisegno
+ *  volta). "intensity" e' quanta ce n'e' (0..1), "speed" la velocita' di
+ *  caduta (1 = normale). Richiede un ridisegno
  *  continuo finche' il wallpaper e' visibile, quindi e' spento di default per non
  *  consumare batteria extra. "fps": 60 (default) oppure 30 (risparmio batteria). */
 data class WeatherConfig(
     val type: String,          // "none" | "rain" | "snow"
     val intensity: Float,      // 0..1
     val speed: Float,          // moltiplicatore, tipicamente 0.2..2.5
-    val fps: Int = 60,
-    val fogEnabled: Boolean = false,
-    val fogIntensity: Float = 0.5f
+    val fps: Int = 60
 ) {
     val hasPrecipitation: Boolean get() = type == "rain" || type == "snow"
-    /** true se serve il ridisegno continuo (precipitazione e/o nebbia). */
-    val animated: Boolean get() = hasPrecipitation || fogEnabled
+    /** true se serve il ridisegno continuo. */
+    val animated: Boolean get() = hasPrecipitation
 
     companion object {
         private fun cleanType(t: String): String = if (t == "rain" || t == "snow") t else "none"
@@ -191,9 +189,7 @@ data class WeatherConfig(
                     type = cleanType(weather.optString("type", "none")),
                     intensity = weather.optDouble("intensity", 0.5).toFloat().coerceIn(0f, 1f),
                     speed = weather.optDouble("speed", 1.0).toFloat().coerceIn(0.2f, 2.5f),
-                    fps = cleanFps(weather.optInt("fps", 60)),
-                    fogEnabled = weather.optBoolean("fogEnabled", false),
-                    fogIntensity = weather.optDouble("fogIntensity", 0.5).toFloat().coerceIn(0f, 1f)
+                    fps = cleanFps(weather.optInt("fps", 60))
                 )
             }
             if (legacyRain != null) {
