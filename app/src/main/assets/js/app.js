@@ -138,7 +138,6 @@
     fg: { img: null, dataUrl: null, scale: 1, offX: 0, offY: 0 },
     photoDataUrl: null,
     bgDim: 0,
-    linkFgToBg: false,
     clock: {
       enabled: true, mode: "time", customText: "", format: "24", centerDots: false,
       style: defaultStyle(150, 0.30, true),
@@ -830,14 +829,9 @@
       : null;
 
     if (state.fg.img) {
-      const link = state.linkFgToBg;
-      drawCover(
-        context, state.fg.img, w, h,
-        link ? state.bg.scale * state.fg.scale : state.fg.scale,
-        link ? state.bg.offX + state.fg.offX : state.fg.offX,
-        link ? state.bg.offY + state.fg.offY : state.fg.offY,
-        link ? state.bg.rotation : 0
-      );
+      // Il soggetto segue sempre le stesse trasformazioni dello sfondo, cosi'
+      // zoom/spostamento/rotazione muovono i due livelli insieme.
+      drawCover(context, state.fg.img, w, h, state.bg.scale, state.bg.offX, state.bg.offY, state.bg.rotation);
     }
 
     if (state.clock.enabled) {
@@ -907,7 +901,7 @@
   // (avanti = da destra verso sinistra, indietro = da sinistra verso destra) e
   // la distanza percorsa dallo squircle nella barra delle schede.
   // ---------------------------------------------------------------------------
-  const TAB_ORDER = ["media", "clock", "date", "bg", "fg"];
+  const TAB_ORDER = ["media", "clock", "date", "bg", "effects"];
   // Durata SEMPRE uguale sia per lo slide dei pannelli sia per lo squircle:
   // e' proprio la durata costante a "sincronizzare" le due animazioni. I
   // pannelli percorrono sempre la stessa distanza (una larghezza intera) e
@@ -915,7 +909,7 @@
   // scelga. Lo squircle invece percorre una distanza diversa a seconda di
   // quante schede separano il punto di partenza da quello di arrivo: nella
   // stessa durata risulta percio' piu' lento su un tragitto breve (es. Media
-  // -> Orologio) e piu' veloce su un tragitto lungo (es. Media -> Soggetto).
+  // -> Orologio) e piu' veloce su un tragitto lungo (es. Media -> Effetti).
   const TAB_TRANSITION_MS = 300;
 
   const tabsEl = document.getElementById("tabs");
@@ -1027,6 +1021,27 @@
   moveIndicatorTo(document.querySelector(".tab-btn.active"), false);
   window.addEventListener("resize", () => {
     moveIndicatorTo(document.querySelector(".tab-btn.active"), false);
+  });
+
+  // ===========================================================================
+  // SEZIONI A FISARMONICA
+  // ---------------------------------------------------------------------------
+  // Ogni intestazione apre/chiude il blocco sotto di se'. Ne resta aperta al
+  // massimo una per tab: aprirne una chiude le altre dello stesso pannello.
+  // Lo stato iniziale (quale sezione parte aperta) e' gia' nell'HTML tramite
+  // la classe "open" sulla prima .accordion-section di ogni pannello.
+  // ===========================================================================
+  document.querySelectorAll(".accordion-header").forEach((header) => {
+    header.addEventListener("click", () => {
+      const section = header.closest(".accordion-section");
+      if (!section) return;
+      const panel = header.closest(".panel");
+      const wasOpen = section.classList.contains("open");
+      if (panel) {
+        panel.querySelectorAll(".accordion-section.open").forEach((s) => s.classList.remove("open"));
+      }
+      if (!wasOpen) section.classList.add("open");
+    });
   });
 
   // ===========================================================================
@@ -1519,12 +1534,6 @@
   function clearSubject() {
     state.fg.img = null;
     state.fg.dataUrl = null;
-    state.fg.scale = 1;
-    state.fg.offX = 0;
-    state.fg.offY = 0;
-    setSlider("fgScaleRange", 0);
-    setSlider("fgXRange", 0);
-    setSlider("fgYRange", 0);
     const thumb = document.getElementById("thumbFg");
     thumb.style.backgroundImage = "";
     thumb.innerHTML = "<span>vuoto</span>";
@@ -1695,7 +1704,7 @@
     btnSaveUpscaled.classList.remove("hidden");
     const info = upscaleInfoFinal ? " (" + upscaleInfoFinal + ")" : "";
     showToast(hadSubject
-      ? "Upscaling AI completato \u2713" + info + " Soggetto rimosso: rifallo dal tab Soggetto"
+      ? "Upscaling AI completato \u2713" + info + " Soggetto rimosso: rifallo dalla sezione Soggetto in Media"
       : "Upscaling AI completato \u2713" + info);
   };
 
@@ -1736,6 +1745,7 @@
   let cutoutMode = "loop";
   let cutoutLoopPoints = null; // punti (coordinate canvas) tracciati durante il gesto, solo mentre si disegna
   let cutoutEdgeMap = null; // Float32Array w*h, mappa dei contorni (gradiente Sobel): calcolata una volta per foto e riusata a ogni lazo
+  let cutoutBlobMap = null; // { labels, sizeMap }: regioni a basso contrasto interno, calcolate una volta per foto e riusate a ogni lazo
   // Contorno ritaglio (eroderlo/dilata la maschera di N px) e bordo bianco adesivo:
   // entrambi a 0 all'apertura dell'editor, come richiesto ("sempre inizialmente centrale").
   let cutoutMaskOffsetPx = 0;
@@ -1791,6 +1801,7 @@
       cutoutSourceCanvas.height = h;
       cutoutSourceCanvas.getContext("2d").drawImage(img, 0, 0, w, h);
       cutoutEdgeMap = null; // foto nuova: la mappa dei contorni va ricalcolata
+      cutoutBlobMap = null;
 
       cutoutMaskCanvas = document.createElement("canvas");
       cutoutMaskCanvas.width = w;
@@ -2109,21 +2120,25 @@
   // ---------------------------------------------------------------------------
   // Lazo a mano libera: si traccia un contorno grezzo e impreciso intorno a
   // quello che si vuole includere (es. il muro con i graffiti), e al rilascio
-  // il contorno si aggancia da solo ai bordi reali dell'immagine. A differenza
-  // della vecchia bacchetta magica (basata sulla somiglianza di colore) qui si
-  // usa il contrasto locale (gradiente Sobel): funziona anche su superfici con
-  // colori interni molto vari, perche' non dipende dal colore ma da dove ci
-  // sono davvero dei bordi.
+  // il contorno si aggancia da solo agli oggetti veri dell'immagine, invece di
+  // selezionare a peso morto tutto quello che sta dentro il tratto disegnato.
   //
-  // Limite onesto: essendo un algoritmo che parte dal lazo grezzo e lo
-  // ESPANDE fino al bordo vero, puo' correggere un lazo tracciato troppo
-  // all'interno del soggetto, ma non un lazo tracciato troppo all'ESTERNO
-  // (quella parte in eccesso resta selezionata). Conviene tracciare il lazo
-  // un po' dentro al soggetto piuttosto che scavalcarne i bordi; l'eventuale
-  // eccesso si toglie col pennello/gomma manuale.
+  // Come funziona: l'immagine viene divisa una volta sola (per foto, come la
+  // mappa dei contorni) in regioni a basso contrasto interno ("macchie": ogni
+  // pixel e' unito ai vicini il cui gradiente e' sotto soglia, con un
+  // Union-Find). Una macchia e' inclusa nella selezione solo se la META' O
+  // PIU' della sua superficie totale cade dentro al tratto grezzo: una scritta
+  // piccola interamente dentro al tratto entra per intero (comprese le parti
+  // che sporgono leggermente fuori), mentre uno sfondo ampio di cui il tratto
+  // copre solo un lembo resta fuori. Cosi' un tratto disegnato attorno a una
+  // scritta prende la scritta e non anche lo sfondo dietro. Limite di fondo:
+  // se il tratto include davvero PIU' della meta' di un sia pure oggetto
+  // indesiderato (es. lo sfondo intorno a un piccolo soggetto), quello resta
+  // dentro; l'eventuale eccesso si toglie col pennello/gomma manuale.
   // ---------------------------------------------------------------------------
-  const LOOP_MAX_GROWTH = 60; // px oltre il lazo grezzo, oltre cui la crescita si ferma comunque
   const LOOP_EDGE_THRESHOLD = 60; // soglia di gradiente sopra la quale si considera un bordo vero
+  const LOOP_BLOB_OVERLAP_RATIO = 0.5; // quota minima (sulla superficie TOTALE della macchia) dentro al tratto per includerla
+  const LOOP_BBOX_MARGIN = 120; // px di margine attorno al riquadro del tratto, oltre cui nulla viene incluso (limite di sicurezza)
 
   /** Mappa dei contorni (intensita' del bordo per ogni pixel, via gradiente
    *  Sobel su scala di grigi) calcolata una sola volta per foto e riusata a
@@ -2153,6 +2168,47 @@
     return mag;
   }
 
+  /** Divide l'immagine (una volta per foto) in "macchie": regioni di pixel
+   *  reciprocamente raggiungibili senza mai attraversare un bordo vero
+   *  (gradiente sopra LOOP_EDGE_THRESHOLD). Ogni macchia e' tipicamente un
+   *  oggetto o una zona di sfondo uniforme; il lazo, invece di selezionare
+   *  alla cieca tutto cio' che copre, sceglie quali macchie includere in
+   *  base a quanto le copre (vedi runLoopSelection). Union-Find con path
+   *  compression: costo lineare nel numero di pixel, come la mappa dei
+   *  contorni con cui condivide la cache. */
+  function ensureCutoutBlobMap() {
+    if (cutoutBlobMap) return cutoutBlobMap;
+    const w = cutoutSourceCanvas.width, h = cutoutSourceCanvas.height;
+    const edgeMap = ensureCutoutEdgeMap();
+    const n = w * h;
+    const parent = new Int32Array(n);
+    for (let i = 0; i < n; i++) parent[i] = i;
+    function find(x) {
+      while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+      return x;
+    }
+    function union(a, b) {
+      a = find(a); b = find(b);
+      if (a !== b) parent[a] = b;
+    }
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        if (x < w - 1 && Math.max(edgeMap[i], edgeMap[i + 1]) <= LOOP_EDGE_THRESHOLD) union(i, i + 1);
+        if (y < h - 1 && Math.max(edgeMap[i], edgeMap[i + w]) <= LOOP_EDGE_THRESHOLD) union(i, i + w);
+      }
+    }
+    const labels = new Int32Array(n);
+    const sizeMap = new Map();
+    for (let i = 0; i < n; i++) {
+      const r = find(i);
+      labels[i] = r;
+      sizeMap.set(r, (sizeMap.get(r) || 0) + 1);
+    }
+    cutoutBlobMap = { labels, sizeMap };
+    return cutoutBlobMap;
+  }
+
   function runLoopSelection(points) {
     if (!cutoutSourceCanvas || !cutoutMaskCanvas || points.length < 3) return;
     const w = cutoutSourceCanvas.width, h = cutoutSourceCanvas.height;
@@ -2172,45 +2228,37 @@
     rctx.fill();
     const roughAlpha = rctx.getImageData(0, 0, w, h).data;
 
-    const selected = new Uint8Array(w * h);
+    let minX = w, maxX = 0, minY = h, maxY = 0;
+    for (const pt of points) {
+      if (pt.x < minX) minX = pt.x; if (pt.x > maxX) maxX = pt.x;
+      if (pt.y < minY) minY = pt.y; if (pt.y > maxY) maxY = pt.y;
+    }
+    const capMinX = Math.max(0, Math.floor(minX) - LOOP_BBOX_MARGIN);
+    const capMaxX = Math.min(w - 1, Math.ceil(maxX) + LOOP_BBOX_MARGIN);
+    const capMinY = Math.max(0, Math.floor(minY) - LOOP_BBOX_MARGIN);
+    const capMaxY = Math.min(h - 1, Math.ceil(maxY) + LOOP_BBOX_MARGIN);
+
+    const { labels, sizeMap } = ensureCutoutBlobMap();
+
+    // Per ogni macchia toccata dal tratto grezzo, conta quanti dei suoi pixel
+    // (sulla superficie TOTALE della macchia, non solo dentro al tratto)
+    // cadono dentro al tratto.
+    const overlapCount = new Map();
     for (let i = 0; i < w * h; i++) {
-      if (roughAlpha[i * 4 + 3] > 0) selected[i] = 1;
+      if (roughAlpha[i * 4 + 3] === 0) continue;
+      const lb = labels[i];
+      overlapCount.set(lb, (overlapCount.get(lb) || 0) + 1);
     }
+    const includedBlobs = new Set();
+    overlapCount.forEach((count, lb) => {
+      if (count / sizeMap.get(lb) >= LOOP_BLOB_OVERLAP_RATIO) includedBlobs.add(lb);
+    });
 
-    // Frontiera iniziale: i pixel del lazo grezzo che confinano gia' con
-    // pixel non selezionati (il suo bordo).
-    const queue = [];
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
+    const selected = new Uint8Array(w * h);
+    for (let y = capMinY; y <= capMaxY; y++) {
+      for (let x = capMinX; x <= capMaxX; x++) {
         const i = y * w + x;
-        if (!selected[i]) continue;
-        if ((x > 0 && !selected[i - 1]) || (x < w - 1 && !selected[i + 1]) ||
-            (y > 0 && !selected[i - w]) || (y < h - 1 && !selected[i + w])) {
-          queue.push(i);
-        }
-      }
-    }
-
-    const edgeMap = ensureCutoutEdgeMap();
-    const depth = new Int16Array(w * h); // 0 = gia' dentro il lazo grezzo
-    let qi = 0;
-    while (qi < queue.length) {
-      const p = queue[qi++];
-      const px = p % w, py = (p - px) / w;
-      const d = depth[p];
-      if (d >= LOOP_MAX_GROWTH) continue;
-      const neighbors = [
-        px > 0 ? p - 1 : -1, px < w - 1 ? p + 1 : -1, py > 0 ? p - w : -1, py < h - 1 ? p + w : -1,
-      ];
-      for (const np of neighbors) {
-        if (np < 0 || selected[np]) continue;
-        // Non attraversare un bordo vero: se qui il gradiente e' alto, la
-        // crescita si ferma proprio li' (e' cosi' che il contorno "si
-        // aggancia" al bordo reale piu' vicino).
-        if (edgeMap[np] > LOOP_EDGE_THRESHOLD) continue;
-        selected[np] = 1;
-        depth[np] = d + 1;
-        queue.push(np);
+        if (includedBlobs.has(labels[i])) selected[i] = 1;
       }
     }
 
@@ -2492,12 +2540,6 @@
     img.onload = () => {
       state.fg.img = img;
       state.fg.dataUrl = dataUrl;
-      state.fg.scale = 1;
-      state.fg.offX = 0;
-      state.fg.offY = 0;
-      setSlider("fgScaleRange", 0);
-      setSlider("fgXRange", 0);
-      setSlider("fgYRange", 0);
       const thumb = document.getElementById("thumbFg");
       thumb.style.backgroundImage = `url(${dataUrl})`;
       thumb.innerHTML = "";
@@ -2722,7 +2764,6 @@
   bindRange("bgYRange", "bgYValue", (v) => { state.bg.offY = v / 100; });
   bindRange("bgRotationRange", "bgRotationValue", (v) => { state.bg.rotation = v; }, (v) => v + "°");
   bindRange("dimRange", "dimValue", (v) => { state.bgDim = v; }, (v) => v + "%");
-  bindCheck("linkFgCheck", (v) => { state.linkFgToBg = v; });
 
   // --- meteo (pioggia / neve / nebbia) ---
   const weatherTypeSelect = document.getElementById("weatherTypeSelect");
@@ -2773,17 +2814,7 @@
   // ===========================================================================
   // SOGGETTO
   // ===========================================================================
-  bindRange("fgScaleRange", "fgScaleValue", (v) => { state.fg.scale = sliderToScale(v); }, scaleFormatter);
-  bindRange("fgXRange", "fgXValue", (v) => { state.fg.offX = v / 100; });
-  bindRange("fgYRange", "fgYValue", (v) => { state.fg.offY = v / 100; });
 
-  document.getElementById("fgResetBtn").addEventListener("click", () => {
-    setSlider("fgScaleRange", 0);
-    setSlider("fgXRange", 0);
-    setSlider("fgYRange", 0);
-    renderPreview();
-    showToast("Soggetto riportato nella posizione originale");
-  });
 
   // ===========================================================================
   // RESET TUTTO (icona nell'header) — doppio tocco di conferma
@@ -2804,7 +2835,6 @@
     state.clock = { enabled: true, mode: "time", customText: "", format: "24", centerDots: false, style: defaultStyle(150, 0.30, true), splitStyle: defaultClockSplit() };
     state.date = { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.30, false) };
     state.bgDim = 0;
-    state.linkFgToBg = false;
     state.bg.scale = 1; state.bg.offX = 0; state.bg.offY = 0; state.bg.rotation = 0;
     state.weather = { type: "none", intensity: 0.5, speed: 1, fps: 60 };
     clearSubject();
@@ -2817,7 +2847,6 @@
     document.getElementById("dateEnabledCheck").checked = true;
     document.getElementById("dateFormatSelect").value = "full";
     document.getElementById("dateUppercaseCheck").checked = false;
-    document.getElementById("linkFgCheck").checked = false;
 
     syncTextLayerUi("clock", state.clock);
     syncTextLayerUi("date", state.date);
@@ -2832,11 +2861,6 @@
     setSlider("bgYRange", Math.round(state.bg.offY * 100));
     setSlider("bgRotationRange", Math.round(state.bg.rotation));
     setSlider("dimRange", Math.round(state.bgDim));
-    setSlider("fgScaleRange", scaleToSlider(state.fg.scale));
-    setSlider("fgXRange", Math.round(state.fg.offX * 100));
-    setSlider("fgYRange", Math.round(state.fg.offY * 100));
-    const link = document.getElementById("linkFgCheck");
-    if (link) link.checked = state.linkFgToBg;
     if (weatherTypeSelect) weatherTypeSelect.value = state.weather.type;
     setSlider("rainIntensityRange", Math.round(state.weather.intensity * 100));
     setSlider("rainSpeedRange", Math.round(state.weather.speed * 100));
@@ -2893,14 +2917,7 @@
       drawCover(g, state.bg.img, c.width, c.height, state.bg.scale, state.bg.offX, state.bg.offY, state.bg.rotation);
     }
     if (state.fg.img) {
-      const link = state.linkFgToBg;
-      drawCover(
-        g, state.fg.img, c.width, c.height,
-        link ? state.bg.scale * state.fg.scale : state.fg.scale,
-        link ? state.bg.offX + state.fg.offX : state.fg.offX,
-        link ? state.bg.offY + state.fg.offY : state.fg.offY,
-        link ? state.bg.rotation : 0
-      );
+      drawCover(g, state.fg.img, c.width, c.height, state.bg.scale, state.bg.offX, state.bg.offY, state.bg.rotation);
     }
     return c;
   }
@@ -3098,10 +3115,6 @@
       bgOffX: state.bg.offX,
       bgOffY: state.bg.offY,
       bgRotation: state.bg.rotation,
-      fgScale: state.fg.scale,
-      fgOffX: state.fg.offX,
-      fgOffY: state.fg.offY,
-      linkFgToBg: state.linkFgToBg,
       weather: {
         type: state.weather.type,
         intensity: state.weather.intensity,
@@ -3168,10 +3181,8 @@
       state.bg.offX = Number(cfg.bgOffX) || 0;
       state.bg.offY = Number(cfg.bgOffY) || 0;
       state.bg.rotation = Number(cfg.bgRotation) || 0;
-      state.fg.scale = Number(cfg.fgScale) || 1;
-      state.fg.offX = Number(cfg.fgOffX) || 0;
-      state.fg.offY = Number(cfg.fgOffY) || 0;
-      state.linkFgToBg = !!cfg.linkFgToBg;
+      // fgScale/fgOffX/fgOffY/linkFgToBg non esistono piu': il soggetto segue
+      // sempre le trasformazioni dello sfondo.
 
       // Nuovo formato "weather"; le config salvate prima di neve/nebbia hanno
       // ancora il vecchio oggetto "rain" (enabled/intensity/speed/fps).

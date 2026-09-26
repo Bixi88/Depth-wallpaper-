@@ -21,12 +21,13 @@ import java.util.Locale
 /**
  * Porting nativo 1:1 del render() dell'editor (assets/js/app.js).
  *
+
  * Livelli: sfondo -> velo scuro -> orologio -> data -> soggetto ritagliato.
  *
- * Il PNG del soggetto conserva l'inquadratura completa della foto originale: disegnato
- * con la geometria "cover" neutra (scala 1, nessuno scostamento) ricade esattamente
- * dove si trovava nella foto. Le trasformazioni dello SFONDO non lo toccano, a meno
- * che l'utente non attivi linkFgToBg.
+ * Il PNG del soggetto conserva l'inquadratura completa della foto originale, quindi
+ * disegnarlo con la STESSA geometria "cover" dello sfondo (scala/offset/rotazione)
+ * lo rimette esattamente dov'era nella foto: sfondo e soggetto restano sempre
+ * allineati, zoom e spostamenti li spostano insieme.
  */
 object DepthRenderer {
 
@@ -79,14 +80,7 @@ object DepthRenderer {
         }
 
         if (fg != null) {
-            val link = config.linkFgToBg
-            drawCover(
-                canvas, fg, w, h,
-                if (link) config.bgScale * config.fgScale else config.fgScale,
-                if (link) config.bgOffX + config.fgOffX else config.fgOffX,
-                if (link) config.bgOffY + config.fgOffY else config.fgOffY,
-                if (link) config.bgRotation else 0f
-            )
+            drawCover(canvas, fg, w, h, config.bgScale, config.bgOffX, config.bgOffY, config.bgRotation)
         }
 
         if (config.clock.enabled) {

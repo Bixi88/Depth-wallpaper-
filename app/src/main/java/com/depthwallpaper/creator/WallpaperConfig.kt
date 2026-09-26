@@ -215,11 +215,6 @@ data class WallpaperConfig(
     val bgOffX: Float,
     val bgOffY: Float,
     val bgRotation: Float,
-    val fgScale: Float,
-    val fgOffX: Float,
-    val fgOffY: Float,
-    /** Se true, zoom/spostamento/rotazione dello sfondo trascinano anche il soggetto. */
-    val linkFgToBg: Boolean,
     val weather: WeatherConfig = WeatherConfig.default()
 ) {
     companion object {
@@ -236,8 +231,6 @@ data class WallpaperConfig(
                 style = TextLayerConfig.default(38f, 0.30f, false)
             ),
             bgDim = 0f, bgScale = 1f, bgOffX = 0f, bgOffY = 0f, bgRotation = 0f,
-            fgScale = 1f, fgOffX = 0f, fgOffY = 0f,
-            linkFgToBg = false,
             weather = WeatherConfig.default()
         )
 
@@ -273,10 +266,8 @@ data class WallpaperConfig(
                     bgOffX = root.optDouble("bgOffX", 0.0).toFloat(),
                     bgOffY = root.optDouble("bgOffY", 0.0).toFloat(),
                     bgRotation = root.optDouble("bgRotation", 0.0).toFloat(),
-                    fgScale = root.optDouble("fgScale", 1.0).toFloat(),
-                    fgOffX = root.optDouble("fgOffX", 0.0).toFloat(),
-                    fgOffY = root.optDouble("fgOffY", 0.0).toFloat(),
-                    linkFgToBg = root.optBoolean("linkFgToBg", false),
+                    // fgScale/fgOffX/fgOffY/linkFgToBg non esistono piu': il soggetto
+                    // segue sempre le trasformazioni dello sfondo (vedi DepthRenderer).
                     weather = WeatherConfig.fromJson(root.optJSONObject("weather"), root.optJSONObject("rain"))
                 )
             } catch (e: Throwable) {

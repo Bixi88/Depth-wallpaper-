@@ -74,13 +74,13 @@
             </svg>
           </span> Sfondo
         </button>
-        <button class="tab-btn" data-tab="fg">
+        <button class="tab-btn" data-tab="effects">
           <span class="tab-ico">
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="8.5" r="3.7" />
-              <path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6" />
+              <path d="M7 15.5a4 4 0 0 1 .4-7.98A5.5 5.5 0 0 1 18 9.5a3.4 3.4 0 0 1-1 6.6H7Z" />
+              <path d="M9 19l-1 2M13 19l-1 2M17 19l-1 2" />
             </svg>
-          </span> Soggetto
+          </span> Effetti
         </button>
       </nav>
 
@@ -89,42 +89,53 @@
 
         <!-- ---- MEDIA ---- -->
         <div class="panel active" id="panel-media">
-          <div class="field-group">
-            <label>Foto</label>
-            <div class="upload-row">
-              <button class="upload-btn" id="btnUploadBg">Carica foto</button>
-              <div class="thumb" id="thumbBg"><span>vuoto</span></div>
+          <div class="accordion-section open">
+            <button type="button" class="accordion-header"><span>Foto</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
+              <div class="field-group">
+                <div class="upload-row">
+                  <button class="upload-btn" id="btnUploadBg">Carica foto</button>
+                  <div class="thumb" id="thumbBg"><span>vuoto</span></div>
+                </div>
+                <p class="hint-text">La foto caricata diventa lo sfondo e fa da sorgente per il ritaglio. Caricando una foto nuova il soggetto precedente viene azzerato.</p>
+              </div>
             </div>
-            <p class="hint-text">La foto caricata diventa lo sfondo e fa da sorgente per il ritaglio. Caricando una foto nuova il soggetto precedente viene azzerato.</p>
           </div>
 
-          <div class="field-group">
-            <button class="upload-btn ghost" id="btnUpscale">Upscaling AI</button>
-            <div class="field-group" id="upscaleModelGroup" style="margin-top:10px;">
-              <label for="upscaleModelSelect">Modello</label>
-              <select id="upscaleModelSelect">
-                <option value="fast" selected>Veloce</option>
-                <option value="quality">Qualit&agrave; superiore (pi&ugrave; lento)</option>
-              </select>
-              <p class="hint-text" id="upscaleModelHint">Il modello "Qualit&agrave;" ricostruisce pi&ugrave; dettaglio ma impiega parecchio di pi&ugrave;: usalo se hai tempo di aspettare, altrimenti resta su "Veloce".</p>
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Upscaling AI</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
+              <div class="field-group">
+                <button class="upload-btn ghost" id="btnUpscale">Upscaling AI</button>
+                <div class="field-group" id="upscaleModelGroup" style="margin-top:10px;">
+                  <label for="upscaleModelSelect">Modello</label>
+                  <select id="upscaleModelSelect">
+                    <option value="fast" selected>Veloce</option>
+                    <option value="quality">Qualit&agrave; superiore (pi&ugrave; lento)</option>
+                  </select>
+                </div>
+                <p class="hint-text">Migliora la nitidezza della foto intera con un modello AI on-device (Real-ESRGAN). Puoi applicarlo piu' volte di seguito per un effetto piu' marcato.</p>
+                <button class="link-btn hidden" id="btnSaveUpscaled">Salva foto upscalata (JPG)</button>
+              </div>
             </div>
-            <p class="hint-text">Migliora la nitidezza della foto intera con un modello AI on-device (Real-ESRGAN). Puoi applicarlo piu' volte di seguito per un effetto piu' marcato.</p>
-            <button class="link-btn hidden" id="btnSaveUpscaled">Salva foto upscalata (JPG)</button>
           </div>
 
-          <div class="field-group">
-            <label>Soggetto in primo piano</label>
-            <div class="upload-row">
-              <button class="upload-btn" id="btnCutout">Ritaglia soggetto dalla foto</button>
-              <div class="thumb checker" id="thumbFg"><span>vuoto</span></div>
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Soggetto</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
+              <div class="field-group">
+                <div class="upload-row">
+                  <button class="upload-btn" id="btnCutout">Ritaglia soggetto dalla foto</button>
+                  <div class="thumb checker" id="thumbFg"><span>vuoto</span></div>
+                </div>
+                <div class="cutout-actions-row" style="margin-top:10px;">
+                  <button class="upload-btn ghost" id="btnCutoutOther">Usa un'altra foto</button>
+                  <button class="upload-btn ghost" id="btnRemoveFg">Rimuovi soggetto</button>
+                </div>
+                <p class="hint-text">Il soggetto viene isolato da un modello AI on-device e rimesso <b>esattamente dov'era nella foto</b>, come livello separato sopra l'orologio.</p>
+              </div>
             </div>
-            <div class="cutout-actions-row" style="margin-top:10px;">
-              <button class="upload-btn ghost" id="btnCutoutOther">Usa un'altra foto</button>
-              <button class="upload-btn ghost" id="btnRemoveFg">Rimuovi soggetto</button>
-            </div>
-            <p class="hint-text">Il soggetto viene isolato da un modello AI on-device e rimesso <b>esattamente dov'era nella foto</b>, come livello separato sopra l'orologio.</p>
           </div>
-
         </div>
 
         <!-- ---- OROLOGIO ---- -->
@@ -136,33 +147,52 @@
             </label>
           </div>
 
-          <div class="field-group">
-            <label for="clockFontSelect">Font</label>
-            <select id="clockFontSelect"></select>
-          </div>
-          <div class="field-group">
-            <label class="checkbox-row"><input type="checkbox" id="clockBoldCheck" checked /><span>Grassetto</span></label>
-          </div>
-          <div class="field-group">
-            <label class="checkbox-row"><input type="checkbox" id="clockItalicCheck" /><span>Corsivo</span></label>
-          </div>
-
-          <div class="field-group" id="clockFormatGroup">
-            <label for="clockFormatSelect">Formato ora</label>
-            <select id="clockFormatSelect">
-              <option value="24" selected>24 ore &middot; 09:05</option>
-              <option value="24short">24 ore senza zero &middot; 9:05</option>
-            </select>
-          </div>
-
-          <div class="field-group" id="clockCenterDotsGroup">
-            <label class="checkbox-row">
-              <input type="checkbox" id="clockCenterDotsCheck" />
-              <span>Puntini centrali</span>
-            </label>
+          <div class="accordion-section open">
+            <button type="button" class="accordion-header"><span>Stile testo</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
+              <div class="field-group">
+                <label for="clockFontSelect">Font</label>
+                <select id="clockFontSelect"></select>
+              </div>
+              <div class="field-group">
+                <label class="checkbox-row"><input type="checkbox" id="clockBoldCheck" checked /><span>Grassetto</span></label>
+              </div>
+              <div class="field-group">
+                <label class="checkbox-row"><input type="checkbox" id="clockItalicCheck" /><span>Corsivo</span></label>
+              </div>
+              <div class="field-group">
+                <label>Dimensione <span class="value-badge" id="clockSizeValue">150</span></label>
+                <input type="range" id="clockSizeRange" min="20" max="700" value="150" data-center="150" />
+              </div>
+              <div class="field-group">
+                <label>Spaziatura lettere <span class="value-badge" id="clockTrackValue">0</span></label>
+                <input type="range" id="clockTrackRange" min="-20" max="80" value="0" data-center="0" />
+              </div>
+            </div>
           </div>
 
-          <div class="field-group section-title">Disposizione</div>
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Formato</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
+              <div class="field-group" id="clockFormatGroup">
+                <label for="clockFormatSelect">Formato ora</label>
+                <select id="clockFormatSelect">
+                  <option value="24" selected>24 ore &middot; 09:05</option>
+                  <option value="24short">24 ore senza zero &middot; 9:05</option>
+                </select>
+              </div>
+              <div class="field-group" id="clockCenterDotsGroup">
+                <label class="checkbox-row">
+                  <input type="checkbox" id="clockCenterDotsCheck" />
+                  <span>Puntini centrali</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Disposizione</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <select id="clockSplitArrangementSelect">
               <option value="horizontal">Orizzontale &middot; ore a sinistra, minuti a destra</option>
@@ -212,7 +242,12 @@
             </div>
           </div>
 
-          <div class="field-group section-title">Posizione</div>
+            </div>
+          </div>
+
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Posizione</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <label>Orizzontale <span class="value-badge" id="clockXValue">50%</span></label>
             <input type="range" id="clockXRange" min="0" max="100" value="50" data-center="50" />
@@ -226,8 +261,12 @@
             <input type="range" id="clockRotationRange" min="-180" max="180" value="0" data-center="0" />
             <p class="hint-text">Ruota il testo attorno al suo centro: utile per titoli in verticale o inclinati lungo il soggetto.</p>
           </div>
+            </div>
+          </div>
 
-          <div class="field-group section-title">Deformazione</div>
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Deformazione</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <label>Stretch orizzontale <span class="value-badge" id="clockStretchXValue">100%</span></label>
             <input type="range" id="clockStretchXRange" min="40" max="250" value="100" data-center="100" />
@@ -236,18 +275,12 @@
             <label>Stretch verticale <span class="value-badge" id="clockStretchYValue">100%</span></label>
             <input type="range" id="clockStretchYRange" min="40" max="250" value="100" data-center="100" />
           </div>
-
-          <div class="field-group section-title">Carattere</div>
-          <div class="field-group">
-            <label>Dimensione <span class="value-badge" id="clockSizeValue">150</span></label>
-            <input type="range" id="clockSizeRange" min="20" max="700" value="150" data-center="150" />
-          </div>
-          <div class="field-group">
-            <label>Spaziatura lettere <span class="value-badge" id="clockTrackValue">0</span></label>
-            <input type="range" id="clockTrackRange" min="-20" max="80" value="0" data-center="0" />
+            </div>
           </div>
 
-          <div class="field-group section-title">Colore</div>
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Colore</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <label>Colore testo</label>
             <div class="color-row">
@@ -275,7 +308,12 @@
             <input type="range" id="clockOpacityRange" min="0" max="100" value="100" data-center="100" />
           </div>
 
-          <div class="field-group section-title">Leggibilit&agrave;</div>
+            </div>
+          </div>
+
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Leggibilit&agrave;</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <label>Contorno <span class="value-badge" id="clockOutlineValue">0</span></label>
             <input type="range" id="clockOutlineRange" min="0" max="30" value="0" data-center="0" />
@@ -293,6 +331,8 @@
             <label>Colore alone</label>
             <button type="button" class="color-swatch-btn" id="clockGlowColor" data-value="#000000"></button>
           </div>
+            </div>
+          </div>
 
           <div class="field-group">
             <button class="upload-btn ghost" id="clockResetBtn">Ripristina orologio</button>
@@ -305,6 +345,9 @@
             <label class="checkbox-row"><input type="checkbox" id="dateEnabledCheck" checked /><span>Mostra data</span></label>
           </div>
 
+          <div class="accordion-section open">
+            <button type="button" class="accordion-header"><span>Stile testo</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <label for="dateFontSelect">Font</label>
             <select id="dateFontSelect"></select>
@@ -315,7 +358,20 @@
           <div class="field-group">
             <label class="checkbox-row"><input type="checkbox" id="dateItalicCheck" /><span>Corsivo</span></label>
           </div>
+          <div class="field-group">
+            <label>Dimensione <span class="value-badge" id="dateSizeValue">38</span></label>
+            <input type="range" id="dateSizeRange" min="12" max="220" value="38" data-center="38" />
+          </div>
+          <div class="field-group">
+            <label>Spaziatura lettere <span class="value-badge" id="dateTrackValue">0</span></label>
+            <input type="range" id="dateTrackRange" min="-10" max="60" value="0" data-center="0" />
+          </div>
+            </div>
+          </div>
 
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Formato</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <label for="dateFormatSelect">Formato</label>
             <select id="dateFormatSelect">
@@ -330,8 +386,12 @@
           <div class="field-group">
             <label class="checkbox-row"><input type="checkbox" id="dateUppercaseCheck" /><span>Tutto MAIUSCOLO</span></label>
           </div>
+            </div>
+          </div>
 
-          <div class="field-group section-title">Posizione</div>
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Posizione</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <label>Orizzontale <span class="value-badge" id="dateXValue">50%</span></label>
             <input type="range" id="dateXRange" min="0" max="100" value="50" data-center="50" />
@@ -344,8 +404,12 @@
             <label>Rotazione <span class="value-badge" id="dateRotationValue">0&deg;</span></label>
             <input type="range" id="dateRotationRange" min="-180" max="180" value="0" data-center="0" />
           </div>
+            </div>
+          </div>
 
-          <div class="field-group section-title">Deformazione</div>
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Deformazione</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <label>Stretch orizzontale <span class="value-badge" id="dateStretchXValue">100%</span></label>
             <input type="range" id="dateStretchXRange" min="40" max="250" value="100" data-center="100" />
@@ -354,18 +418,12 @@
             <label>Stretch verticale <span class="value-badge" id="dateStretchYValue">100%</span></label>
             <input type="range" id="dateStretchYRange" min="40" max="250" value="100" data-center="100" />
           </div>
-
-          <div class="field-group section-title">Carattere</div>
-          <div class="field-group">
-            <label>Dimensione <span class="value-badge" id="dateSizeValue">38</span></label>
-            <input type="range" id="dateSizeRange" min="12" max="220" value="38" data-center="38" />
-          </div>
-          <div class="field-group">
-            <label>Spaziatura lettere <span class="value-badge" id="dateTrackValue">0</span></label>
-            <input type="range" id="dateTrackRange" min="-10" max="60" value="0" data-center="0" />
+            </div>
           </div>
 
-          <div class="field-group section-title">Colore</div>
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Colore</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <label>Colore testo</label>
             <div class="color-row">
@@ -392,8 +450,12 @@
             <label>Opacit&agrave; <span class="value-badge" id="dateOpacityValue">100%</span></label>
             <input type="range" id="dateOpacityRange" min="0" max="100" value="100" data-center="100" />
           </div>
+            </div>
+          </div>
 
-          <div class="field-group section-title">Leggibilit&agrave;</div>
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Leggibilit&agrave;</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <label>Contorno <span class="value-badge" id="dateOutlineValue">0</span></label>
             <input type="range" id="dateOutlineRange" min="0" max="20" value="0" data-center="0" />
@@ -410,6 +472,8 @@
             <label>Colore alone</label>
             <button type="button" class="color-swatch-btn" id="dateGlowColor" data-value="#000000"></button>
           </div>
+            </div>
+          </div>
 
           <div class="field-group">
             <button class="upload-btn ghost" id="dateResetBtn">Ripristina data</button>
@@ -418,10 +482,13 @@
 
         <!-- ---- SFONDO ---- -->
         <div class="panel" id="panel-bg">
+          <div class="accordion-section open">
+            <button type="button" class="accordion-header"><span>Immagine</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <label>Zoom <span class="value-badge" id="bgScaleValue">100%</span></label>
             <input type="range" id="bgScaleRange" min="-100" max="100" value="0" data-center="0" />
-            <p class="hint-text">Al centro &egrave; 100%: a destra ingrandisci fino a 2&times;, a sinistra rimpicciolisci fino a 0,5&times;.</p>
+            <p class="hint-text">Al centro &egrave; 100%: a destra ingrandisci fino a 2&times;, a sinistra rimpicciolisci fino a 0,5&times;. Il soggetto segue sempre lo sfondo.</p>
           </div>
           <div class="field-group">
             <label>Sposta orizzontalmente <span class="value-badge" id="bgXValue">0</span></label>
@@ -439,12 +506,26 @@
               <button class="upload-btn ghost" id="bgRotateRightBtn">&#8635; 90&deg;</button>
             </div>
           </div>
+            </div>
+          </div>
+
+          <div class="accordion-section">
+            <button type="button" class="accordion-header"><span>Aspetto</span><span class="accordion-chevron">&#9662;</span></button>
+            <div class="accordion-body">
           <div class="field-group">
             <label>Oscura <span class="value-badge" id="dimValue">0%</span></label>
             <input type="range" id="dimRange" min="0" max="100" value="0" data-center="0" />
           </div>
+            </div>
+          </div>
 
-          <div class="field-group section-title">Effetti</div>
+          <div class="field-group">
+            <button class="upload-btn ghost" id="bgResetBtn">Ripristina sfondo</button>
+          </div>
+        </div>
+
+        <!-- ---- EFFETTI ---- -->
+        <div class="panel" id="panel-effects">
           <div class="field-group">
             <label for="weatherTypeSelect">Meteo</label>
             <select id="weatherTypeSelect">
@@ -468,38 +549,6 @@
               <option value="30">30 FPS &middot; risparmio batteria</option>
               <option value="60" selected>60 FPS</option>
             </select>
-          </div>
-
-          <div class="field-group">
-            <label class="checkbox-row">
-              <input type="checkbox" id="linkFgCheck" />
-              <span>Muovi anche il soggetto</span>
-            </label>
-            <p class="hint-text">Normalmente zoom, spostamenti e rotazione agiscono solo sullo sfondo, mentre il soggetto resta fermo dov'era nella foto. Attiva questa opzione se vuoi trasformare i due livelli insieme.</p>
-          </div>
-
-          <div class="field-group">
-            <button class="upload-btn ghost" id="bgResetBtn">Ripristina sfondo</button>
-          </div>
-        </div>
-
-        <!-- ---- SOGGETTO ---- -->
-        <div class="panel" id="panel-fg">
-          <p class="hint-text" style="margin-top:0;">Di default il soggetto sta esattamente dov'era nella foto. Usa questi comandi solo se vuoi spostarlo apposta.</p>
-          <div class="field-group">
-            <label>Zoom <span class="value-badge" id="fgScaleValue">100%</span></label>
-            <input type="range" id="fgScaleRange" min="-100" max="100" value="0" data-center="0" />
-          </div>
-          <div class="field-group">
-            <label>Sposta orizzontalmente <span class="value-badge" id="fgXValue">0</span></label>
-            <input type="range" id="fgXRange" min="-100" max="100" value="0" data-center="0" />
-          </div>
-          <div class="field-group">
-            <label>Sposta verticalmente <span class="value-badge" id="fgYValue">0</span></label>
-            <input type="range" id="fgYRange" min="-100" max="100" value="0" data-center="0" />
-          </div>
-          <div class="field-group">
-            <button class="upload-btn ghost" id="fgResetBtn">Rimetti nella posizione originale</button>
           </div>
         </div>
 
