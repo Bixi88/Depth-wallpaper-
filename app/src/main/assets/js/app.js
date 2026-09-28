@@ -1024,27 +1024,6 @@
   });
 
   // ===========================================================================
-  // SEZIONI A FISARMONICA
-  // ---------------------------------------------------------------------------
-  // Ogni intestazione apre/chiude il blocco sotto di se'. Ne resta aperta al
-  // massimo una per tab: aprirne una chiude le altre dello stesso pannello.
-  // Lo stato iniziale (quale sezione parte aperta) e' gia' nell'HTML tramite
-  // la classe "open" sulla prima .accordion-section di ogni pannello.
-  // ===========================================================================
-  document.querySelectorAll(".accordion-header").forEach((header) => {
-    header.addEventListener("click", () => {
-      const section = header.closest(".accordion-section");
-      if (!section) return;
-      const panel = header.closest(".panel");
-      const wasOpen = section.classList.contains("open");
-      if (panel) {
-        panel.querySelectorAll(".accordion-section.open").forEach((s) => s.classList.remove("open"));
-      }
-      if (!wasOpen) section.classList.add("open");
-    });
-  });
-
-  // ===========================================================================
   // SLIDER PERSONALIZZATI
   // ---------------------------------------------------------------------------
   // Gli slider nativi cambiano valore al primo tocco: scorrendo la lista in
