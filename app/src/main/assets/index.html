@@ -602,7 +602,44 @@
       <button class="cutout-tool-btn active" data-tool="brush">&#10022; Pennello (ripristina)</button>
       <button class="cutout-tool-btn" data-tool="eraser">&#9003; Gomma (rimuovi)</button>
     </div>
-    <p id="cutoutModeHint" class="hint-text center">Traccia un contorno grezzo intorno a quello che vuoi includere (es. il muro): si aggancia da solo ai bordi reali. Meglio restare un po' dentro al soggetto che scavalcarlo. Due dita = zoom/sposta l'immagine.</p>
+    <div id="cutoutLoopTools" class="cutout-loop-tools">
+      <div class="segmented-control" id="cutoutLoopOpSeg" role="tablist" aria-label="Aggiungi o togli">
+        <button type="button" class="segmented-btn active" data-op="add" role="tab" aria-selected="true">&#43; Aggiungi</button>
+        <button type="button" class="segmented-btn" data-op="remove" role="tab" aria-selected="false">&#8722; Togli</button>
+      </div>
+    </div>
+    <p id="cutoutModeHint" class="hint-text center">Traccia un contorno intorno a quello che vuoi aggiungere o togliere: si aggancia da solo ai bordi reali. Due dita = zoom/sposta l'immagine.</p>
+    <div id="cutoutLoopSettings" class="cutout-loop-settings">
+      <div class="field-group">
+        <label>Durezza lazo <span class="value-badge" id="cutoutLoopHardnessValue">100%</span></label>
+        <input type="range" id="cutoutLoopHardnessRange" min="0" max="100" value="100" data-center="100" data-no-magnet />
+        <p class="hint-text">100% = bordo netto. Piu' scendi, piu' il bordo di ci&ograve; che aggiungi/togli diventa sfumato (utile per capelli, pelo, ombre).</p>
+      </div>
+      <details class="cutout-advanced">
+      <summary>Avanzate: aggancio ai bordi</summary>
+      <div class="field-group">
+        <label class="checkbox-row"><input type="checkbox" id="cutoutLoopExactCheck" /><span>Segui esattamente il tratto (senza aggancio ai bordi)</span></label>
+        <p class="hint-text">Acceso: viene aggiunto/tolto esattamente quello che racchiudi, come un lazo classico. Spento: il lazo si aggancia agli oggetti.</p>
+      </div>
+      <div id="cutoutLoopSnapGroup">
+        <div class="field-group">
+          <label>Dettaglio bordi <span class="value-badge" id="cutoutLoopDetailValue">64</span></label>
+          <input type="range" id="cutoutLoopDetailRange" min="0" max="100" value="64" data-center="64" data-no-magnet />
+          <p class="hint-text">Alto = riconosce anche i contorni deboli e separa piu' pezzi (piu' preciso, ma puo' frammentare). Basso = unisce zone simili in un solo blocco.</p>
+        </div>
+        <div class="field-group">
+          <label>Copertura minima <span class="value-badge" id="cutoutLoopCoverValue">50%</span></label>
+          <input type="range" id="cutoutLoopCoverRange" min="10" max="100" value="50" data-center="50" data-no-magnet />
+          <p class="hint-text">Quanta parte di un pezzo deve stare dentro al tratto per essere scelta. Bassa = basta sfiorarlo; alta = deve essere quasi tutto dentro.</p>
+        </div>
+        <div class="field-group">
+          <label>Margine oltre il tratto <span class="value-badge" id="cutoutLoopReachValue">40 px</span></label>
+          <input type="range" id="cutoutLoopReachRange" min="0" max="120" value="40" data-center="40" data-no-magnet />
+          <p class="hint-text">Quanto il lazo pu&ograve; sconfinare oltre la linea disegnata. 0 = mai fuori dal tratto.</p>
+        </div>
+      </div>
+      </details>
+    </div>
     <div id="cutoutBrushSizeGroup" class="field-group hidden">
       <label>Dimensione pennello <span class="value-badge" id="cutoutBrushValue">30</span></label>
       <input type="range" id="cutoutBrushRange" min="6" max="120" value="30" data-center="30" />
@@ -623,10 +660,11 @@
       <p class="hint-text">Aggiunge un contorno bianco pieno attorno al soggetto, come uno sticker.</p>
     </div>
     <div class="cutout-actions-row">
+      <button id="cutoutUndoBtn" class="upload-btn ghost" disabled>&#8630; Annulla</button>
       <button id="cutoutResetBtn" class="upload-btn ghost">Ricomincia da AI</button>
       <button id="cutoutClearBtn" class="upload-btn ghost">Svuota tutto</button>
     </div>
-    <p class="hint-text center">Pennello = ripristina il soggetto &middot; Gomma = rimuovi lo sfondo residuo.</p>
+    <p class="hint-text center">Lazo: &laquo;Aggiungi&raquo; ripristina il soggetto, &laquo;Togli&raquo; rimuove lo sfondo. Pennello = ripristina &middot; Gomma = rimuovi.</p>
   </div>
 </div>
 
