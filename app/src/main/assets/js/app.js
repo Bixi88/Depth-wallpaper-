@@ -1738,7 +1738,19 @@
   let cutoutMode = "loop";
   let cutoutLoopPoints = null; // punti (coordinate canvas) tracciati durante il gesto, solo mentre si disegna
   let cutoutEdgeMap = null; // Float32Array w*h, mappa dei contorni (gradiente Sobel): calcolata una volta per foto e riusata a ogni lazo
-  let cutoutBlobMap = null; // { labels, sizeMap }: regioni a basso contrasto interno, calcolate una volta per foto e riusate a ogni lazo
+  let cutoutBlobMap = null; // { labels, sizeMap, threshold }: regioni a basso contrasto interno, calcolate per foto (e per soglia) e riusate a ogni lazo
+  // Operazione del lazo: "add" (aggiunge al soggetto) oppure "remove" (toglie
+  // dal soggetto, cioe' lo trasforma in sfondo trasparente).
+  let cutoutLoopOp = "add";
+  // Parametri del lazo, tutti regolabili da slider.
+  let cutoutLoopHardness = 100;      // 0-100: 100 = bordo netto, meno = bordo sfumato (feather)
+  let cutoutLoopExact = false;       // true = segue esattamente il tratto, senza aggancio ai bordi
+  let cutoutLoopEdgeThreshold = 60;  // soglia gradiente: piu' bassa = piu' dettaglio (piu' pezzi)
+  let cutoutLoopCoverRatio = 0.5;    // quota minima di un pezzo dentro al tratto per sceglierlo
+  let cutoutLoopReachPx = 40;        // sconfinamento massimo oltre la linea disegnata
+  // Cronologia per "Annulla": istantanee della maschera prima di ogni modifica.
+  const cutoutUndoStack = [];
+  const CUTOUT_UNDO_MAX = 6;
   // Contorno ritaglio (eroderlo/dilata la maschera di N px) e bordo bianco adesivo:
   // entrambi a 0 all'apertura dell'editor, come richiesto ("sempre inizialmente centrale").
   let cutoutMaskOffsetPx = 0;
@@ -1814,6 +1826,7 @@
       setSlider("cutoutSmoothRange", 0);
       setCutoutMode("loop");
       resetCutoutView();
+      clearCutoutUndo();
 
       cutoutModal.classList.remove("hidden");
       renderCutoutPreview();
@@ -1971,6 +1984,7 @@
   function applyCutoutMask(maskDataUrl) {
     const maskImg = new Image();
     maskImg.onload = () => {
+      pushCutoutUndo();
       const mctx = cutoutMaskCanvas.getContext("2d");
       mctx.clearRect(0, 0, cutoutMaskCanvas.width, cutoutMaskCanvas.height);
       mctx.drawImage(maskImg, 0, 0, cutoutMaskCanvas.width, cutoutMaskCanvas.height);
@@ -1980,6 +1994,9 @@
   }
 
   function renderCutoutPreview() {
+    // Nessuna foto/maschera ancora caricata (es. i controlli vengono inizializzati
+    // all'avvio, prima di aprire l'editor): niente da disegnare.
+    if (!cutoutSourceCanvas || !cutoutMaskCanvas) return;
     const w = cutoutCanvas.width, h = cutoutCanvas.height;
 
     let effectiveMask = cutoutMaskOffsetPx
@@ -2032,8 +2049,9 @@
     if (cutoutLoopPoints && cutoutLoopPoints.length > 0) {
       cutoutCtx.save();
       const scale = 1 / cutoutZoom;
-      const glowColor = "rgba(180, 255, 235, 0.95)";
-      const coreColor = "#f4fffb";
+      const removing = cutoutLoopOp === "remove";
+      const glowColor = removing ? "rgba(255, 120, 145, 0.95)" : "rgba(180, 255, 235, 0.95)";
+      const coreColor = removing ? "#fff4f6" : "#f4fffb";
 
       const strokePath = () => {
         cutoutCtx.beginPath();
@@ -2063,7 +2081,7 @@
       // Segmento tratteggiato che anticipa la chiusura del lazo.
       if (cutoutLoopPoints.length > 1) {
         cutoutCtx.shadowBlur = 8 * scale;
-        cutoutCtx.strokeStyle = "rgba(244,255,251,0.55)";
+        cutoutCtx.strokeStyle = removing ? "rgba(255,244,246,0.55)" : "rgba(244,255,251,0.55)";
         cutoutCtx.lineWidth = Math.max(1.2, 1.6 * scale);
         cutoutCtx.setLineDash([7 * scale, 6 * scale]);
         cutoutCtx.beginPath();
@@ -2129,9 +2147,11 @@
   // indesiderato (es. lo sfondo intorno a un piccolo soggetto), quello resta
   // dentro; l'eventuale eccesso si toglie col pennello/gomma manuale.
   // ---------------------------------------------------------------------------
-  const LOOP_EDGE_THRESHOLD = 60; // soglia di gradiente sopra la quale si considera un bordo vero
-  const LOOP_BLOB_OVERLAP_RATIO = 0.5; // quota minima (sulla superficie TOTALE della macchia) dentro al tratto per includerla
-  const LOOP_BBOX_MARGIN = 120; // px di margine attorno al riquadro del tratto, oltre cui nulla viene incluso (limite di sicurezza)
+  // Valori di default (regolabili da slider, vedi cutoutLoop* sopra):
+  //  - soglia di gradiente sopra la quale si considera un bordo vero: 60
+  //  - quota minima (sulla superficie TOTALE della macchia) dentro al tratto: 50%
+  //  - sconfinamento massimo oltre il tratto disegnato: 40 px
+  const LOOP_FEATHER_MAX_PX = 12; // sfumatura massima del bordo con durezza lazo = 0
 
   /** Mappa dei contorni (intensita' del bordo per ogni pixel, via gradiente
    *  Sobel su scala di grigi) calcolata una sola volta per foto e riusata a
@@ -2163,14 +2183,15 @@
 
   /** Divide l'immagine (una volta per foto) in "macchie": regioni di pixel
    *  reciprocamente raggiungibili senza mai attraversare un bordo vero
-   *  (gradiente sopra LOOP_EDGE_THRESHOLD). Ogni macchia e' tipicamente un
+   *  (gradiente sopra la soglia "Dettaglio bordi"). Ogni macchia e' tipicamente un
    *  oggetto o una zona di sfondo uniforme; il lazo, invece di selezionare
    *  alla cieca tutto cio' che copre, sceglie quali macchie includere in
    *  base a quanto le copre (vedi runLoopSelection). Union-Find con path
    *  compression: costo lineare nel numero di pixel, come la mappa dei
    *  contorni con cui condivide la cache. */
   function ensureCutoutBlobMap() {
-    if (cutoutBlobMap) return cutoutBlobMap;
+    if (cutoutBlobMap && cutoutBlobMap.threshold === cutoutLoopEdgeThreshold) return cutoutBlobMap;
+    const threshold = cutoutLoopEdgeThreshold;
     const w = cutoutSourceCanvas.width, h = cutoutSourceCanvas.height;
     const edgeMap = ensureCutoutEdgeMap();
     const n = w * h;
@@ -2187,8 +2208,8 @@
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const i = y * w + x;
-        if (x < w - 1 && Math.max(edgeMap[i], edgeMap[i + 1]) <= LOOP_EDGE_THRESHOLD) union(i, i + 1);
-        if (y < h - 1 && Math.max(edgeMap[i], edgeMap[i + w]) <= LOOP_EDGE_THRESHOLD) union(i, i + w);
+        if (x < w - 1 && Math.max(edgeMap[i], edgeMap[i + 1]) <= threshold) union(i, i + 1);
+        if (y < h - 1 && Math.max(edgeMap[i], edgeMap[i + w]) <= threshold) union(i, i + w);
       }
     }
     const labels = new Int32Array(n);
@@ -2198,8 +2219,33 @@
       labels[i] = r;
       sizeMap.set(r, (sizeMap.get(r) || 0) + 1);
     }
-    cutoutBlobMap = { labels, sizeMap };
+    cutoutBlobMap = { labels, sizeMap, threshold };
     return cutoutBlobMap;
+  }
+
+  // ---- Annulla -------------------------------------------------------------
+  const cutoutUndoBtn = document.getElementById("cutoutUndoBtn");
+  function updateCutoutUndoBtn() {
+    if (cutoutUndoBtn) cutoutUndoBtn.disabled = cutoutUndoStack.length === 0;
+  }
+  /** Salva la maschera attuale prima di una modifica, per poterla annullare. */
+  function pushCutoutUndo() {
+    if (!cutoutMaskCanvas) return;
+    const w = cutoutMaskCanvas.width, h = cutoutMaskCanvas.height;
+    cutoutUndoStack.push(cutoutMaskCanvas.getContext("2d").getImageData(0, 0, w, h));
+    if (cutoutUndoStack.length > CUTOUT_UNDO_MAX) cutoutUndoStack.shift();
+    updateCutoutUndoBtn();
+  }
+  function clearCutoutUndo() {
+    cutoutUndoStack.length = 0;
+    updateCutoutUndoBtn();
+  }
+  function cutoutUndo() {
+    if (!cutoutMaskCanvas || cutoutUndoStack.length === 0) return;
+    const snap = cutoutUndoStack.pop();
+    cutoutMaskCanvas.getContext("2d").putImageData(snap, 0, 0);
+    updateCutoutUndoBtn();
+    renderCutoutPreview();
   }
 
   function runLoopSelection(points) {
@@ -2221,49 +2267,82 @@
     rctx.fill();
     const roughAlpha = rctx.getImageData(0, 0, w, h).data;
 
-    let minX = w, maxX = 0, minY = h, maxY = 0;
-    for (const pt of points) {
-      if (pt.x < minX) minX = pt.x; if (pt.x > maxX) maxX = pt.x;
-      if (pt.y < minY) minY = pt.y; if (pt.y > maxY) maxY = pt.y;
+    // Quanto il risultato puo' uscire dal tratto: poligono + fascia di
+    // "Margine oltre il tratto" px tutt'intorno (piu' preciso del vecchio
+    // riquadro rettangolare, che permetteva sconfinamenti anche in diagonale).
+    let capAlpha = roughAlpha;
+    if (cutoutLoopReachPx > 0) {
+      rctx.strokeStyle = "#fff";
+      rctx.lineJoin = "round";
+      rctx.lineCap = "round";
+      rctx.lineWidth = cutoutLoopReachPx * 2;
+      rctx.stroke();
+      capAlpha = rctx.getImageData(0, 0, w, h).data;
     }
-    const capMinX = Math.max(0, Math.floor(minX) - LOOP_BBOX_MARGIN);
-    const capMaxX = Math.min(w - 1, Math.ceil(maxX) + LOOP_BBOX_MARGIN);
-    const capMinY = Math.max(0, Math.floor(minY) - LOOP_BBOX_MARGIN);
-    const capMaxY = Math.min(h - 1, Math.ceil(maxY) + LOOP_BBOX_MARGIN);
 
-    const { labels, sizeMap } = ensureCutoutBlobMap();
+    const selected = new Uint8ClampedArray(w * h); // 0-255: copertura della selezione per pixel
 
-    // Per ogni macchia toccata dal tratto grezzo, conta quanti dei suoi pixel
-    // (sulla superficie TOTALE della macchia, non solo dentro al tratto)
-    // cadono dentro al tratto.
-    const overlapCount = new Map();
-    for (let i = 0; i < w * h; i++) {
-      if (roughAlpha[i * 4 + 3] === 0) continue;
-      const lb = labels[i];
-      overlapCount.set(lb, (overlapCount.get(lb) || 0) + 1);
-    }
-    const includedBlobs = new Set();
-    overlapCount.forEach((count, lb) => {
-      if (count / sizeMap.get(lb) >= LOOP_BLOB_OVERLAP_RATIO) includedBlobs.add(lb);
-    });
+    if (cutoutLoopExact) {
+      // Nessun aggancio: si prende esattamente il poligono disegnato.
+      for (let i = 0; i < w * h; i++) selected[i] = roughAlpha[i * 4 + 3];
+    } else {
+      const { labels, sizeMap } = ensureCutoutBlobMap();
 
-    const selected = new Uint8Array(w * h);
-    for (let y = capMinY; y <= capMaxY; y++) {
-      for (let x = capMinX; x <= capMaxX; x++) {
-        const i = y * w + x;
-        if (includedBlobs.has(labels[i])) selected[i] = 1;
+      // Per ogni macchia toccata dal tratto grezzo, conta quanti dei suoi pixel
+      // (sulla superficie TOTALE della macchia, non solo dentro al tratto)
+      // cadono dentro al tratto.
+      const overlapCount = new Map();
+      for (let i = 0; i < w * h; i++) {
+        if (roughAlpha[i * 4 + 3] === 0) continue;
+        const lb = labels[i];
+        overlapCount.set(lb, (overlapCount.get(lb) || 0) + 1);
+      }
+      const includedBlobs = new Set();
+      overlapCount.forEach((count, lb) => {
+        if (count / sizeMap.get(lb) >= cutoutLoopCoverRatio) includedBlobs.add(lb);
+      });
+
+      for (let i = 0; i < w * h; i++) {
+        if (capAlpha[i * 4 + 3] === 0) continue;
+        if (includedBlobs.has(labels[i])) selected[i] = 255;
       }
     }
 
-    const mctx = cutoutMaskCanvas.getContext("2d");
-    const maskImgData = mctx.getImageData(0, 0, w, h);
-    const md = maskImgData.data;
+    pushCutoutUndo();
+
+    // La selezione diventa un'immagine bianca con alpha = copertura, cosi' si
+    // puo' sfumare (durezza < 100) e poi aggiungere o togliere dalla maschera
+    // con le normali operazioni di composizione del canvas.
+    const selCanvas = document.createElement("canvas");
+    selCanvas.width = w;
+    selCanvas.height = h;
+    const sctx = selCanvas.getContext("2d");
+    const selData = sctx.createImageData(w, h);
+    const sd = selData.data;
     for (let i = 0; i < selected.length; i++) {
-      if (!selected[i]) continue;
-      const mi = i * 4;
-      md[mi] = 255; md[mi + 1] = 255; md[mi + 2] = 255; md[mi + 3] = 255;
+      const a = selected[i];
+      if (!a) continue;
+      const o = i * 4;
+      sd[o] = 255; sd[o + 1] = 255; sd[o + 2] = 255; sd[o + 3] = a;
     }
-    mctx.putImageData(maskImgData, 0, 0);
+    sctx.putImageData(selData, 0, 0);
+
+    let finalSel = selCanvas;
+    const featherPx = ((100 - cutoutLoopHardness) / 100) * LOOP_FEATHER_MAX_PX;
+    if (featherPx > 0.25) {
+      finalSel = document.createElement("canvas");
+      finalSel.width = w;
+      finalSel.height = h;
+      const fctx = finalSel.getContext("2d");
+      fctx.filter = `blur(${featherPx}px)`;
+      fctx.drawImage(selCanvas, 0, 0);
+      fctx.filter = "none";
+    }
+
+    const mctx = cutoutMaskCanvas.getContext("2d");
+    mctx.globalCompositeOperation = cutoutLoopOp === "remove" ? "destination-out" : "source-over";
+    mctx.drawImage(finalSel, 0, 0);
+    mctx.globalCompositeOperation = "source-over";
     scheduleCutoutRender();
   }
 
@@ -2353,6 +2432,7 @@
     const p = cutoutCanvasPoint(evt);
     if (cutoutMode === "manual") {
       cutoutDrawing = true;
+      pushCutoutUndo();
       cutoutPaintAt(p.x, p.y);
       showCutoutLoupe(evt, p);
     } else {
@@ -2445,7 +2525,11 @@
   const cutoutManualTools = document.getElementById("cutoutManualTools");
   const cutoutBrushSizeGroup = document.getElementById("cutoutBrushSizeGroup");
   const cutoutModeHint = document.getElementById("cutoutModeHint");
-  const LOOP_HINT = "Traccia un contorno grezzo intorno a quello che vuoi includere (es. il muro): si aggancia da solo ai bordi reali. Meglio restare un po' dentro al soggetto che scavalcarlo. Due dita = zoom/sposta l'immagine.";
+  const cutoutLoopTools = document.getElementById("cutoutLoopTools");
+  const cutoutLoopSettings = document.getElementById("cutoutLoopSettings");
+  const LOOP_HINT_ADD = "Traccia un contorno intorno a quello che vuoi AGGIUNGERE al soggetto: si aggancia da solo ai bordi reali. Due dita = zoom/sposta l'immagine.";
+  const LOOP_HINT_REMOVE = "Traccia un contorno intorno a quello che vuoi TOGLIERE (sfondo, residui): si aggancia da solo ai bordi reali. Due dita = zoom/sposta l'immagine.";
+  function loopHint() { return cutoutLoopOp === "remove" ? LOOP_HINT_REMOVE : LOOP_HINT_ADD; }
   const MANUAL_HINT = "Un dito = disegna col pennello/gomma scelto \u00b7 due dita = zoom/sposta l'immagine.";
 
   function setCutoutMode(mode) {
@@ -2460,7 +2544,9 @@
         ? "\u25ce Torna al lazo"
         : "\u2726 Attiva pennello manuale";
     }
-    if (cutoutModeHint) cutoutModeHint.textContent = mode === "manual" ? MANUAL_HINT : LOOP_HINT;
+    if (cutoutLoopTools) cutoutLoopTools.classList.toggle("hidden", mode === "manual");
+    if (cutoutLoopSettings) cutoutLoopSettings.classList.toggle("hidden", mode === "manual");
+    if (cutoutModeHint) cutoutModeHint.textContent = mode === "manual" ? MANUAL_HINT : loopHint();
     scheduleCutoutRender();
   }
 
@@ -2495,9 +2581,58 @@
     (v) => v + " px"
   );
 
+  // --- Lazo: Aggiungi / Togli ---
+  const cutoutLoopOpButtons = Array.from(document.querySelectorAll("#cutoutLoopOpSeg .segmented-btn"));
+  cutoutLoopOpButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      cutoutLoopOp = btn.dataset.op === "remove" ? "remove" : "add";
+      cutoutLoopOpButtons.forEach((b) => {
+        const active = b === btn;
+        b.classList.toggle("active", active);
+        b.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      if (cutoutModeHint && cutoutMode === "loop") cutoutModeHint.textContent = loopHint();
+    });
+  });
+
+  // --- Lazo: parametri ---
+  bindRange(
+    "cutoutLoopHardnessRange", "cutoutLoopHardnessValue",
+    (v) => { cutoutLoopHardness = v; },
+    (v) => v + "%"
+  );
+  // "Dettaglio bordi" 0-100 -> soglia gradiente 150..10 (piu' dettaglio = soglia piu' bassa).
+  bindRange(
+    "cutoutLoopDetailRange", "cutoutLoopDetailValue",
+    (v) => { cutoutLoopEdgeThreshold = Math.round(150 - v * 1.4); }
+  );
+  bindRange(
+    "cutoutLoopCoverRange", "cutoutLoopCoverValue",
+    (v) => { cutoutLoopCoverRatio = v / 100; },
+    (v) => v + "%"
+  );
+  bindRange(
+    "cutoutLoopReachRange", "cutoutLoopReachValue",
+    (v) => { cutoutLoopReachPx = v; },
+    (v) => v + " px"
+  );
+  const cutoutLoopExactCheck = document.getElementById("cutoutLoopExactCheck");
+  const cutoutLoopSnapGroup = document.getElementById("cutoutLoopSnapGroup");
+  if (cutoutLoopExactCheck) {
+    cutoutLoopExactCheck.addEventListener("change", () => {
+      cutoutLoopExact = cutoutLoopExactCheck.checked;
+      // Senza aggancio, dettaglio/copertura non servono; il margine resta
+      // significativo solo con l'aggancio, quindi si nasconde tutto il gruppo.
+      if (cutoutLoopSnapGroup) cutoutLoopSnapGroup.classList.toggle("hidden", cutoutLoopExact);
+    });
+  }
+
+  if (cutoutUndoBtn) cutoutUndoBtn.addEventListener("click", cutoutUndo);
+
   document.getElementById("cutoutResetBtn").addEventListener("click", requestAiCutout);
 
   document.getElementById("cutoutClearBtn").addEventListener("click", () => {
+    pushCutoutUndo();
     const mctx = cutoutMaskCanvas.getContext("2d");
     mctx.clearRect(0, 0, cutoutMaskCanvas.width, cutoutMaskCanvas.height);
     renderCutoutPreview();
