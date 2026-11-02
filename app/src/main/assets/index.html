@@ -206,6 +206,15 @@
             <p class="hint-text">100 &egrave; la spaziatura normale tra la riga delle ore e quella dei minuti; scendendo si avvicinano fino a toccarsi a 0.</p>
           </div>
 
+          <div class="field-group" id="clockLayerGroup">
+            <label for="clockLayerSelect">Posizione rispetto al soggetto</label>
+            <select id="clockLayerSelect">
+              <option value="back">Sotto il soggetto</option>
+              <option value="front">Sopra il soggetto</option>
+            </select>
+            <p class="hint-text">Vale per ora e minuti insieme. Con &laquo;Ore e minuti separati&raquo; attivo si sceglie invece per ciascuno dei due.</p>
+          </div>
+
           <div class="field-group">
             <label class="checkbox-row">
               <input type="checkbox" id="clockSplitEnabledCheck" />
@@ -392,6 +401,13 @@
           <div class="panel-section">
             <div class="section-heading">Posizione</div>
             <div class="panel-section-body">
+          <div class="field-group">
+            <label for="dateLayerSelect">Posizione rispetto al soggetto</label>
+            <select id="dateLayerSelect">
+              <option value="back">Sotto il soggetto</option>
+              <option value="front">Sopra il soggetto</option>
+            </select>
+          </div>
           <div class="field-group">
             <label>Orizzontale <span class="value-badge" id="dateXValue">50%</span></label>
             <input type="range" id="dateXRange" min="0" max="100" value="50" data-center="50" />

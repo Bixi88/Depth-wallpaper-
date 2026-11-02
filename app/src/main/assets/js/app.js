@@ -140,10 +140,11 @@
     bgDim: 0,
     clock: {
       enabled: true, mode: "time", customText: "", format: "24", centerDots: false,
+      layer: "back", // "back" (sotto al soggetto) | "front" (sopra): orologio intero, vale solo senza ore/minuti separati
       style: defaultStyle(150, 0.30, true),
       splitStyle: defaultClockSplit(),
     },
-    date: { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.30, false) },
+    date: { enabled: true, format: "full", uppercase: false, layer: "back", style: defaultStyle(38, 0.30, false) },
     weather: { type: "none", intensity: 0.5, speed: 1, fps: 60 },
   };
 
@@ -446,6 +447,9 @@
     const weight = effectiveBold ? "700" : "400";
     const italic = style.italic ? "italic " : "";
     context.font = `${italic}${weight} ${size}px ${fontCss(style.fontKey)}`;
+    // Anteprima alla massima nitidezza: contorni reali dei glifi, senza
+    // arrotondamenti/hinting (ignorato dai browser che non lo supportano).
+    if ("textRendering" in context) context.textRendering = "geometricPrecision";
 
     // Adattamento automatico su una riga (orologio in modalita' "ora", data): i
     // motori di testo di WebView e di Android nativo possono misurare lo stesso
@@ -630,8 +634,13 @@
     const verticalArrangement = split && split.arrangement === "vertical" && clock.mode !== "custom";
     const splitStyleActive = !!(split && split.enabled) && clock.mode !== "custom";
 
+    // Passaggio dell'orologio intero (sopra/sotto il soggetto): conta solo
+    // quando ore e minuti NON sono separati. Con "separati" attivo decidono
+    // hourLayer/minuteLayer, e questo valore viene ignorato.
+    const wholeClockPass = clock.layer === "front" ? "front" : "back";
+
     if (!splitStyleActive && !verticalArrangement) {
-      if (pass === "back") {
+      if (pass === wholeClockPass) {
         return drawTextLayer(context, w, h, clock.style, text, multiline, clock.centerDots);
       }
       return null;
@@ -645,8 +654,8 @@
       // quelli unificati dello stile base finche' "separati" non e' attivo:
       // in quel caso entrambe le righe stanno sempre sullo stesso passaggio
       // ("back"), esattamente come l'orologio normale non diviso.
-      const hourLayerPass = splitStyleActive ? split.hourLayer : "back";
-      const minuteLayerPass = splitStyleActive ? split.minuteLayer : "back";
+      const hourLayerPass = splitStyleActive ? split.hourLayer : wholeClockPass;
+      const minuteLayerPass = splitStyleActive ? split.minuteLayer : wholeClockPass;
       const drawHour = hourLayerPass === pass;
       const drawMinute = minuteLayerPass === pass;
       if (!drawHour && !drawMinute) return null;
@@ -824,7 +833,8 @@
       ? drawClockLayer(context, w, h, state.clock, "back")
       : null;
 
-    const dateBox = state.date.enabled
+    const dateFront = state.date.layer === "front";
+    let dateBox = (state.date.enabled && !dateFront)
       ? drawTextLayer(context, w, h, state.date.style, dateString(), false)
       : null;
 
@@ -840,6 +850,10 @@
       // riquadro per il trascinamento arriva allora dal passaggio "front".
       const frontBox = drawClockLayer(context, w, h, state.clock, "front");
       clockBox = clockBox || frontBox;
+    }
+
+    if (state.date.enabled && dateFront) {
+      dateBox = drawTextLayer(context, w, h, state.date.style, dateString(), false);
     }
 
     drawWeather(context, w, h, state.weather, Date.now());
@@ -2670,6 +2684,10 @@
     const sp = state.clock.splitStyle;
     document.getElementById("clockSplitEnabledCheck").checked = !!sp.enabled;
     clockSplitGroup.classList.toggle("hidden", !sp.enabled);
+    // La scelta sopra/sotto dell'orologio intero e' alternativa a quella per
+    // ore/minuti separati: non possono mai comparire insieme.
+    document.getElementById("clockLayerGroup").classList.toggle("hidden", !!sp.enabled);
+    document.getElementById("clockLayerSelect").value = state.clock.layer === "front" ? "front" : "back";
     document.getElementById("clockSplitArrangementSelect").value = sp.arrangement || "horizontal";
 
     const verticalActive = isVerticalSplitActive();
@@ -2695,6 +2713,7 @@
     }
     syncClockSplitUi();
   });
+  bindSelect("clockLayerSelect", (v) => { state.clock.layer = v === "front" ? "front" : "back"; });
   bindSelect("clockSplitArrangementSelect", (v) => {
     state.clock.splitStyle.arrangement = v;
     syncClockSplitUi();
@@ -2717,6 +2736,7 @@
   document.getElementById("clockResetBtn").addEventListener("click", () => {
     state.clock.style = defaultStyle(150, 0.30, true);
     state.clock.splitStyle = defaultClockSplit();
+    state.clock.layer = "back";
     syncTextLayerUi("clock", state.clock);
     syncClockSplitUi();
     renderPreview();
@@ -2727,9 +2747,12 @@
   bindCheck("dateEnabledCheck", (v) => { state.date.enabled = v; });
   bindSelect("dateFormatSelect", (v) => { state.date.format = v; });
   bindCheck("dateUppercaseCheck", (v) => { state.date.uppercase = v; });
+  bindSelect("dateLayerSelect", (v) => { state.date.layer = v === "front" ? "front" : "back"; });
 
   document.getElementById("dateResetBtn").addEventListener("click", () => {
     state.date.style = defaultStyle(38, 0.30, false);
+    state.date.layer = "back";
+    document.getElementById("dateLayerSelect").value = "back";
     syncTextLayerUi("date", state.date);
     renderPreview();
     showToast("Data ripristinata");
@@ -2811,8 +2834,8 @@
     resetAllArmed = false;
     clearTimeout(resetAllTimer);
 
-    state.clock = { enabled: true, mode: "time", customText: "", format: "24", centerDots: false, style: defaultStyle(150, 0.30, true), splitStyle: defaultClockSplit() };
-    state.date = { enabled: true, format: "full", uppercase: false, style: defaultStyle(38, 0.30, false) };
+    state.clock = { enabled: true, mode: "time", customText: "", format: "24", centerDots: false, layer: "back", style: defaultStyle(150, 0.30, true), splitStyle: defaultClockSplit() };
+    state.date = { enabled: true, format: "full", uppercase: false, layer: "back", style: defaultStyle(38, 0.30, false) };
     state.bgDim = 0;
     state.bg.scale = 1; state.bg.offX = 0; state.bg.offY = 0; state.bg.rotation = 0;
     state.weather = { type: "none", intensity: 0.5, speed: 1, fps: 60 };
@@ -2826,6 +2849,7 @@
     document.getElementById("dateEnabledCheck").checked = true;
     document.getElementById("dateFormatSelect").value = "full";
     document.getElementById("dateUppercaseCheck").checked = false;
+    document.getElementById("dateLayerSelect").value = "back";
 
     syncTextLayerUi("clock", state.clock);
     syncTextLayerUi("date", state.date);
@@ -3080,6 +3104,7 @@
         customText: state.clock.customText,
         format: state.clock.format,
         centerDots: state.clock.centerDots,
+        layer: state.clock.layer === "front" ? "front" : "back",
         style: styleJson(state.clock.style),
         splitStyle: clockSplitJson(state.clock.splitStyle),
       },
@@ -3087,6 +3112,7 @@
         enabled: state.date.enabled,
         format: state.date.format,
         uppercase: state.date.uppercase,
+        layer: state.date.layer === "front" ? "front" : "back",
         style: styleJson(state.date.style),
       },
       bgDim: state.bgDim,
@@ -3135,6 +3161,7 @@
         state.clock.customText = cfg.clock.customText || "";
         state.clock.format = cfg.clock.format || "24";
         state.clock.centerDots = !!cfg.clock.centerDots;
+        state.clock.layer = cfg.clock.layer === "front" ? "front" : "back";
         if (cfg.clock.style) Object.assign(state.clock.style, cfg.clock.style);
         state.clock.style.fontKey = normalizeFontKey(state.clock.style.fontKey);
         if (cfg.clock.splitStyle) {
@@ -3152,6 +3179,7 @@
         state.date.enabled = cfg.date.enabled !== false;
         state.date.format = cfg.date.format || "full";
         state.date.uppercase = !!cfg.date.uppercase;
+        state.date.layer = cfg.date.layer === "front" ? "front" : "back";
         if (cfg.date.style) Object.assign(state.date.style, cfg.date.style);
         state.date.style.fontKey = normalizeFontKey(state.date.style.fontKey);
       }
@@ -3193,6 +3221,7 @@
       document.getElementById("dateEnabledCheck").checked = state.date.enabled;
       document.getElementById("dateFormatSelect").value = state.date.format;
       document.getElementById("dateUppercaseCheck").checked = state.date.uppercase;
+      document.getElementById("dateLayerSelect").value = state.date.layer;
 
       syncTextLayerUi("clock", state.clock);
       syncTextLayerUi("date", state.date);

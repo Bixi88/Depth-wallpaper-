@@ -150,6 +150,10 @@ data class ClockConfig(
      * disegnati come forme separate e non come glifo del font: i due gruppi
      * di cifre si distanziano automaticamente per lasciargli spazio. */
     val centerDots: Boolean = false,
+    /** \"back\" (sotto al soggetto ritagliato) | \"front\" (sopra). Riguarda l'orologio
+     *  intero e vale solo quando ore e minuti NON sono separati: con lo stile
+     *  separato attivo decidono splitStyle.hourLayer / minuteLayer. */
+    val layer: String = "back",
     val style: TextLayerConfig,
     val splitStyle: ClockSplitConfig? = null
 )
@@ -159,6 +163,8 @@ data class DateConfig(
     val enabled: Boolean,
     val format: String,
     val uppercase: Boolean,
+    /** "back" (sotto al soggetto ritagliato) | "front" (sopra). */
+    val layer: String = "back",
     val style: TextLayerConfig
 )
 
@@ -246,6 +252,7 @@ data class WallpaperConfig(
                     customText = c.optString("customText", ""),
                     format = c.optString("format", "24"),
                     centerDots = c.optBoolean("centerDots", false),
+                    layer = if (c.optString("layer", "back") == "front") "front" else "back",
                     style = TextLayerConfig.fromJson(c.optJSONObject("style"), 150f, 0.30f, true),
                     splitStyle = ClockSplitConfig.fromJson(c.optJSONObject("splitStyle"))
                 )
@@ -255,6 +262,7 @@ data class WallpaperConfig(
                     enabled = d.optBoolean("enabled", true),
                     format = d.optString("format", "full"),
                     uppercase = d.optBoolean("uppercase", false),
+                    layer = if (d.optString("layer", "back") == "front") "front" else "back",
                     style = TextLayerConfig.fromJson(d.optJSONObject("style"), 38f, 0.30f, false)
                 )
 

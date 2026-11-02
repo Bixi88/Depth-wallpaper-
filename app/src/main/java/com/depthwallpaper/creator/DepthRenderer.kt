@@ -75,7 +75,7 @@ object DepthRenderer {
             drawClockLayer(canvas, w, h, k, config.clock, pass = "back")
         }
 
-        if (config.date.enabled) {
+        if (config.date.enabled && config.date.layer != "front") {
             drawTextLayer(canvas, w, h, k, config.date.style, dateText(config.date), multiline = false)
         }
 
@@ -85,6 +85,11 @@ object DepthRenderer {
 
         if (config.clock.enabled) {
             drawClockLayer(canvas, w, h, k, config.clock, pass = "front")
+        }
+
+        // Data sopra al soggetto (opzione "layer" = "front").
+        if (config.date.enabled && config.date.layer == "front") {
+            drawTextLayer(canvas, w, h, k, config.date.style, dateText(config.date), multiline = false)
         }
     }
 
@@ -118,8 +123,13 @@ object DepthRenderer {
         val verticalArrangement = split != null && split.arrangement == "vertical" && clock.mode != "custom"
         val splitStyleActive = split != null && split.enabled && clock.mode != "custom"
 
+        // Passaggio dell'orologio intero (sopra/sotto il soggetto): conta solo
+        // quando ore e minuti NON sono separati; con "separati" attivo decidono
+        // hourLayer / minuteLayer e questo valore viene ignorato.
+        val wholeClockPass = if (clock.layer == "front") "front" else "back"
+
         if (!splitStyleActive && !verticalArrangement) {
-            if (pass == "back") {
+            if (pass == wholeClockPass) {
                 drawTextLayer(canvas, w, h, k, clock.style, text, multiline = clock.mode == "custom", dotsForColon = clock.centerDots)
             }
             return
@@ -143,8 +153,8 @@ object DepthRenderer {
             // restano quelli unificati dello stile base finche' "separati" non
             // e' attivo: in quel caso entrambe le righe stanno sempre sullo
             // stesso passaggio ("back"), esattamente come l'orologio normale.
-            val hourLayerPass = if (splitStyleActive) split!!.hourLayer else "back"
-            val minuteLayerPass = if (splitStyleActive) split!!.minuteLayer else "back"
+            val hourLayerPass = if (splitStyleActive) split!!.hourLayer else wholeClockPass
+            val minuteLayerPass = if (splitStyleActive) split!!.minuteLayer else wholeClockPass
             val drawHour = hourLayerPass == pass
             val drawMinute = minuteLayerPass == pass
             if (!drawHour && !drawMinute) return
@@ -375,7 +385,13 @@ object DepthRenderer {
         val effectiveBold = boldOverride ?: style.bold
         val effectiveColor = colorOverride ?: style.color
 
-        val base = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG)
+        // Massima nitidezza: LINEAR_TEXT_FLAG + hinting spento fanno disegnare i
+        // glifi dai loro contorni vettoriali reali, senza l'allineamento forzato
+        // alla griglia dei pixel (hinting dei font TrueType) che, con testo
+        // ingrandito/stirato/ruotato, rendeva alcuni font morbidi o irregolari.
+        // Tutti i Paint derivati (alone, contorno, riempimento) copiano questo.
+        val base = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG or Paint.LINEAR_TEXT_FLAG)
+        base.setHinting(Paint.HINTING_OFF)
         base.typeface = typefaceFor(style.fontKey, effectiveBold, style.italic)
         base.textSize = sizePx
 
