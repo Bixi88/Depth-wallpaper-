@@ -1048,6 +1048,25 @@ input[type="text"], select {
   margin-bottom: 4px;
 }
 .cutout-actions-row .upload-btn { flex: 1; }
+.cutout-actions-row .upload-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* Lazo: scelta Aggiungi/Togli e impostazioni (visibili solo con il lazo attivo) */
+.cutout-loop-tools { margin-bottom: 12px; }
+.cutout-loop-tools .segmented-btn[data-op="remove"].active {
+  background: #ff5470;
+  color: #fff;
+}
+.cutout-loop-tools.hidden,
+.cutout-loop-settings.hidden { display: none; }
+.cutout-loop-settings { margin-bottom: 6px; }
+.cutout-advanced { margin: 4px 0 10px; }
+.cutout-advanced > summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  padding: 8px 0;
+}
 
 /* ---------------- UPSCALING AI ---------------- */
 .upload-btn.primary {
